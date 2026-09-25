@@ -13673,7 +13673,9 @@
         },
         "DashboardAgentRowMessage": {
           "0a01046763": "interrumpido",
-          "1ec01cef03": "Interrumpido por el usuario"
+          "1ec01cef03": "Interrumpido por el usuario",
+          "failedAriaLabel": "El turno terminó con un error",
+          "failed": "fallido"
         }
       },
       "crash": {
@@ -15273,7 +15275,8 @@
       "needsInput": "necesita información",
       "working": "trabajando",
       "stopped": "detenido",
-      "finished": "finalizado"
+      "finished": "finalizado",
+      "failed": "fallido"
     }
   },
   "featureTips": {
