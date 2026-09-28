@@ -111,7 +111,7 @@ const helperShell = (method: 'item/started' | 'item/completed'): Frame =>
     id: 'call_3iUPkSEtwkUYstngZm5CNJ52',
     command: COMMAND,
     cwd: '/work/repo',
-    // Persistent exec: the only command source the strip lists.
+    // As the live session reported it; a command is tracked the same whatever its source.
     source: 'unifiedExecStartup',
     status: method === 'item/started' ? 'inProgress' : 'completed',
     ...(method === 'item/completed' ? { exitCode: 0, aggregatedOutput: 'CHILD_DONE\n' } : {})
@@ -222,16 +222,18 @@ describe('Codex default-mode helpers', () => {
     ])
     expect(run.commands()).toEqual([
       expect.objectContaining({
+        membership: 'live',
         description: COMMAND,
         parentChildWorkId: run.agents()[0]?.childWorkId
       })
     ])
+    expect(run.agents()[0]?.operation).toMatchObject({ toolName: 'Bash', input: COMMAND })
 
-    run.send(
-      helperShell('item/completed'),
-      helperReply,
-      turn('turn/completed', HELPER, HELPER_TURN)
-    )
+    run.send(helperShell('item/completed'))
+    // A finished command leaves no record behind.
+    expect(run.commands()).toEqual([])
+
+    run.send(helperReply, turn('turn/completed', HELPER, HELPER_TURN))
     expect(run.agents()).toEqual([
       expect.objectContaining({
         membership: 'settled',
@@ -408,6 +410,24 @@ describe('Codex default-mode helpers', () => {
       state: 'completed',
       input: { description: LABEL }
     })
+  })
+
+  it("keeps a closed helper's running command until Codex reports the killed process's exit", async () => {
+    const run = await session()
+    run.send(
+      turn('turn/started', THREAD_ID, PARENT_TURN),
+      spawnCompleted,
+      turn('turn/started', HELPER, HELPER_TURN),
+      helperShell('item/started'),
+      turn('turn/completed', HELPER, HELPER_TURN),
+      closeCompleted
+    )
+    // The close shuts the helper's thread down and kills its processes; each still reports its
+    // exit on the helper's thread, and that exit is what ends the command.
+    expect(run.commands()).toEqual([expect.objectContaining({ membership: 'live' })])
+    run.send(helperShell('item/completed'))
+    expect(run.commands()).toEqual([])
+    expect(run.strip()).toEqual([])
   })
 
   it('leaves a finished helper finished when its caller closes it', async () => {
