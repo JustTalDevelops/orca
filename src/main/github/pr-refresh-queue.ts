@@ -23,6 +23,8 @@ export type PRRefreshQueueEntry = {
   bypassBackgroundBudget?: boolean
   activeDelayNotified?: boolean
   windowId?: number
+  /** When a worktree create first deferred this entry; bounds the total deferral. */
+  worktreeCreateDeferredAt?: number
 }
 
 export type PRRefreshEnqueue = {

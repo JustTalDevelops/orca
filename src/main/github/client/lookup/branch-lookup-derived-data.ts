@@ -1,4 +1,5 @@
 import { getPRConflictSummary } from '../../conflict-summary'
+import type { GitAdmissionTier } from '../../../git/command-runner/git-exec-options'
 import type { ghRepoExecOptions, OwnerRepo } from '../../gh-utils'
 import { hydrateGitHubPRStack } from '../../github-pr-stack'
 import { detectRepositoryMergeMetadata } from './../detect/repository-merge-metadata'
@@ -10,7 +11,8 @@ export async function derivePRRefreshData(args: {
   dataRepo: OwnerRepo | null
   repoPath: string
   connectionId?: string | null
-  localGitOptions: { wslDistro?: string }
+  // Why the tier is spelled out: the conflict summary defers background derivation during a create.
+  localGitOptions: { wslDistro?: string; admissionTier?: GitAdmissionTier }
   ghOptions: ReturnType<typeof ghRepoExecOptions>
   executionScope: string
   usedExactNumberLookup: boolean

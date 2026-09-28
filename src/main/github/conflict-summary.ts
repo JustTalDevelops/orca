@@ -4,6 +4,7 @@ import {
   isUnsupportedMergeTreeWriteTreeError
 } from '../../shared/git-merge-tree-capability'
 import { gitExecFileAsync } from '../git/runner'
+import { backgroundGitWaitForWorktreeCreate } from '../git/worktree-create-repo-activity'
 import { gitOptionsForWorktree, type GitRuntimeOptions } from '../git/git-runtime-options'
 import {
   clearGitCapabilityStateForTests,
@@ -93,6 +94,11 @@ async function derivePRConflictSummary(
     return cached.value
   }
 
+  // Why here, after the cache reads: a hit spawns no git, so only real derivation yields to a create.
+  const createSettled = backgroundGitWaitForWorktreeCreate(repoPath, localGitOptions.admissionTier)
+  if (createSettled) {
+    await createSettled
+  }
   try {
     const mergeBase = await resolveMergeBase(repoPath, headRefOid, latestBaseOid, localGitOptions)
     const [commitsBehind, files] = await Promise.all([
@@ -153,6 +159,10 @@ async function resolveLatestBaseOid(
   localGitOptions: LocalGitExecOptions
 ): Promise<string | null> {
   const remoteName = 'origin'
+  const createSettled = backgroundGitWaitForWorktreeCreate(repoPath, localGitOptions.admissionTier)
+  if (createSettled) {
+    await createSettled
+  }
 
   try {
     // Why: cap the fetch at 10 s so slow or unreachable remotes don't block

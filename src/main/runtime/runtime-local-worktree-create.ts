@@ -1,4 +1,4 @@
-import { worktreeCreateGit } from '../git/worktree-create-git-executor'
+import { runLocalWorktreeCreate } from '../git/worktree-create-git-executor'
 import type { Repo } from '../../shared/repo-types'
 import type { Worktree } from '../../shared/worktree/types'
 import type { Store } from '../persistence'
@@ -48,7 +48,7 @@ type RuntimeLocalWorktreeCreateArgs<T> = {
 }
 
 export function createRuntimeLocalManagedWorktree<T>(args: RuntimeLocalWorktreeCreateArgs<T>) {
-  return worktreeCreateGit.run(() => performRuntimeLocalWorktreeCreate(args))
+  return runLocalWorktreeCreate(args.repo, () => performRuntimeLocalWorktreeCreate(args))
 }
 
 async function performRuntimeLocalWorktreeCreate<T>(args: RuntimeLocalWorktreeCreateArgs<T>) {

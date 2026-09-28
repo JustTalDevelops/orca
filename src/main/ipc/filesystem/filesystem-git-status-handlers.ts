@@ -36,6 +36,7 @@ import {
 import { getWorktreeSharedLinkPaths } from '../../git/worktree-shared-directories'
 import { applyGitStatusUpstreamRefWatchRequest } from '../git-status-upstream-ref-watch-request'
 import type { FilesystemHandlerContext } from './filesystem-handler-context'
+import { backgroundGitWaitForWorktreeCreate } from '../../git/worktree-create-repo-activity'
 
 export function registerFilesystemGitStatusHandlers(context: FilesystemHandlerContext): void {
   const { store, gitStatusCancellations } = context
@@ -82,6 +83,7 @@ export function registerFilesystemGitStatusHandlers(context: FilesystemHandlerCo
         // Why: one registered-worktree lookup feeds both — status polls this
         // handler, and the scan walks every repo's worktree meta.
         const repo = getLocalRepoForRegisteredWorktree(store, args.worktreePath, worktreePath)
+        await backgroundGitWaitForWorktreeCreate(repo?.path, options.admissionTier)
         const gitOptions = getLocalGitOptionsForRepo(store, repo)
         const sharedLinkPaths = repo ? getWorktreeSharedLinkPaths(repo) : []
         return await getStatus(worktreePath, {

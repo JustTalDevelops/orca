@@ -63,6 +63,10 @@ vi.mock(
 
 import { registerFilesystemHandlers } from './filesystem'
 import { invalidateAuthorizedRootsCache } from './registered-worktree-roots-cache'
+import {
+  _resetWorktreeCreateRepoActivityForTests,
+  holdRepoForWorktreeCreate
+} from '../git/worktree-create-repo-activity'
 
 describe('registerFilesystemHandlers', () => {
   beforeEach(() => {
@@ -97,6 +101,37 @@ describe('registerFilesystemHandlers', () => {
     expect(getBranchCompareMock).toHaveBeenCalledWith(WORKTREE_FEATURE_PATH, 'origin/main', {
       admissionTier: 'background'
     })
+  })
+
+  it('holds a background compare until a create on the same repo settles, but not a user one', async () => {
+    getBranchCompareMock.mockResolvedValue({ summary: { status: 'ready' }, entries: [] })
+    // The handler maps a worktree to its repo from Orca's worktree metadata, not a git call.
+    const storeWithWorktreeMeta = {
+      ...store,
+      getAllWorktreeMeta: () => ({ [`repo-1::${WORKTREE_FEATURE_PATH}`]: {} })
+    }
+    // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: branch compare reads only getRepos, getAllWorktreeMeta and getSettings, all supplied here.
+    registerFilesystemHandlers(storeWithWorktreeMeta as never)
+    const release = holdRepoForWorktreeCreate({ path: REPO_PATH })
+    try {
+      const background = handlers.get('git:branchCompare')!(null, {
+        worktreePath: WORKTREE_FEATURE_PATH,
+        baseRef: 'origin/main',
+        admissionTier: 'background'
+      })
+      await handlers.get('git:branchCompare')!(null, {
+        worktreePath: WORKTREE_FEATURE_PATH,
+        baseRef: 'origin/main',
+        admissionTier: 'interactive'
+      })
+      expect(getBranchCompareMock).toHaveBeenCalledTimes(1)
+
+      release()
+      await background
+      expect(getBranchCompareMock).toHaveBeenCalledTimes(2)
+    } finally {
+      _resetWorktreeCreateRepoActivityForTests()
+    }
   })
 
   it('allows git operations on worktrees outside repo/workspace roots', async () => {

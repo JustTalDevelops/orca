@@ -2,7 +2,7 @@ import { markQoderWorkspaceTrusted } from '../qoder/workspace-trust'
 /* eslint-disable max-lines */
 // Why: worktree create helpers (local + remote) split out of worktrees.ts; the cohesive create flow runs this file just over the per-file line limit.
 
-import { worktreeCreateGit } from '../git/worktree-create-git-executor'
+import { runLocalWorktreeCreate } from '../git/worktree-create-git-executor'
 import { getRepoHostedReviewExecutionHostId } from '../source-control/hosted-review-execution-host'
 import type { BrowserWindow } from 'electron'
 import { posix, win32 } from 'node:path'
@@ -2328,11 +2328,11 @@ export function createLocalWorktree(
   // create that fails after that point — include copy, push target, terminal startup — must still
   // arm the replacement. Fires exactly once, after startup on the success path.
   const rearm: PreparationRearmHolder = { fire: () => {} }
-  return worktreeCreateGit
-    .run(() => performLocalWorktreeCreate(args, repo, store, mainWindow, rearm, runtime))
-    .finally(() => {
-      rearm.fire()
-    })
+  return runLocalWorktreeCreate(repo, () =>
+    performLocalWorktreeCreate(args, repo, store, mainWindow, rearm, runtime)
+  ).finally(() => {
+    rearm.fire()
+  })
 }
 
 async function performLocalWorktreeCreate(

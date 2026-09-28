@@ -36,6 +36,10 @@ vi.mock('./git/local-repo-ref-maintenance', () => ({
 }))
 
 import { installRepoMaintenanceIdleGate } from './repo-maintenance-idle-gate'
+import {
+  _resetWorktreeCreateRepoActivityForTests,
+  holdRepoForWorktreeCreate
+} from './git/worktree-create-repo-activity'
 
 function installProbe(
   overrides: Partial<{ isQuitting: () => boolean; getWorkingAgentCount: () => number }> = {}
@@ -60,6 +64,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  _resetWorktreeCreateRepoActivityForTests()
   vi.restoreAllMocks()
 })
 
@@ -72,10 +77,19 @@ describe('repo maintenance idle gate', () => {
     expect(installProbe({ getWorkingAgentCount: () => 1 }).probe()).toBe(true)
   })
 
-  it('vetoes while a worktree create is prepared or in flight', () => {
+  it('vetoes while a worktree create checkout is being prepared', () => {
     hasPendingPreparationsMock.mockReturnValue(true)
 
     expect(installProbe().probe()).toBe(true)
+  })
+
+  it('vetoes while a worktree create holds any repo, and clears when it settles', () => {
+    const { probe } = installProbe()
+    const release = holdRepoForWorktreeCreate({ path: '/repos/app' })
+
+    expect(probe()).toBe(true)
+    release()
+    expect(probe()).toBe(false)
   })
 
   it('vetoes while a worktree removal is deleting refs', () => {

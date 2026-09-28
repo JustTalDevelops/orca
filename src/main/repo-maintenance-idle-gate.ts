@@ -6,6 +6,7 @@ import {
 } from './git/local-repo-ref-maintenance'
 import { hasWorktreeRemovalsInFlight } from './ipc/worktrees/worktree-ipc-context'
 import { hasPendingWorktreeCreatePreparations } from './worktree-create-preparation'
+import { hasWorktreeCreatesInFlight } from './git/worktree-create-repo-activity'
 
 /**
  * The app-wide "not now" answer for idle repo maintenance.
@@ -30,6 +31,7 @@ export function installRepoMaintenanceIdleGate(
     () =>
       inputs.isQuitting() ||
       inputs.getWorkingAgentCount() > 0 ||
+      hasWorktreeCreatesInFlight() ||
       hasPendingWorktreeCreatePreparations() ||
       hasWorktreeRemovalsInFlight() ||
       isOnBatteryPower()
