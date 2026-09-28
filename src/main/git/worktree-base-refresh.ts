@@ -13,7 +13,7 @@ import { gitExecOptions } from './worktree-operation-options'
 
 export { getLocalBaseRefUpdateSuggestionForWorktreeCreate }
 
-// Why: a refresh wedged in git must not hold every later create of the repo; past this, the next one runs and lock retry covers the overlap.
+// Why: mutating git has no timeout, so a wedged refresh must not hold every later create of the repo; past this the next one runs alongside it and may warn.
 export const LOCAL_BASE_REF_REFRESH_QUEUE_MAX_WAIT_MS = 30_000
 const runPerRepo = createKeyedSerialRunner({ maxWaitMs: LOCAL_BASE_REF_REFRESH_QUEUE_MAX_WAIT_MS })
 
