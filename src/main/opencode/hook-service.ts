@@ -28,6 +28,10 @@ import {
   OPENCODE2_LEGACY_HOOKS_DIR,
   OPENCODE_LEGACY_HOOKS_DIR
 } from './legacy-shared-config-dir'
+import {
+  openCodeTuiPluginDirName,
+  writeOpenCodeTuiPlugin
+} from '../../shared/opencode-tui-plugin-install'
 
 const ORCA_OPENCODE_PLUGIN_FILE = 'orca-opencode-status.js'
 const OPENCODE_OVERLAY_DIR = 'opencode-config-overlays'
@@ -43,6 +47,8 @@ type OpenCodeHookVariant = {
   legacyHooksDir: string
   overlayDir: string
   pluginSource: () => string
+  /** Also install the module as an OpenCode 2 TUI plugin (never for forks without one). */
+  installsTuiPlugin?: boolean
 }
 
 // Why: session IDs may contain path separators and are hashed downstream; cap pathological input.
@@ -99,6 +105,7 @@ export class OpenCodeHookService {
   private readonly pluginFileName: string
   private readonly legacyHooksDir: string
   private readonly overlayDir: string
+  private readonly installsTuiPlugin: boolean
 
   constructor(variant?: OpenCodeHookVariant | (() => string)) {
     const config: OpenCodeHookVariant =
@@ -113,9 +120,11 @@ export class OpenCodeHookService {
             pluginFileName: ORCA_OPENCODE_PLUGIN_FILE,
             legacyHooksDir: OPENCODE_LEGACY_HOOKS_DIR,
             overlayDir: OPENCODE_OVERLAY_DIR,
-            pluginSource: getOpenCodePluginSource
+            pluginSource: getOpenCodePluginSource,
+            installsTuiPlugin: true
           })
     this.pluginSource = config.pluginSource
+    this.installsTuiPlugin = config.installsTuiPlugin === true
     this.pluginFileName = config.pluginFileName
     this.legacyHooksDir = config.legacyHooksDir
     this.overlayDir = config.overlayDir
@@ -253,7 +262,11 @@ export class OpenCodeHookService {
           mkdirSync(overlayPluginsDir, { recursive: true })
           for (const pluginEntry of readdirSync(resolvedSource, { withFileTypes: true })) {
             // Why: skip a user plugin sharing Orca's filename; mirroring it would let writePluginIntoOverlay clobber the user's file.
-            if (pluginEntry.name === this.pluginFileName) {
+            if (
+              pluginEntry.name === this.pluginFileName ||
+              (this.installsTuiPlugin &&
+                pluginEntry.name === openCodeTuiPluginDirName(this.pluginFileName))
+            ) {
               continue
             }
             mirrorEntry(
@@ -283,13 +296,23 @@ export class OpenCodeHookService {
     } catch {
       // File may not exist on a fresh overlay; a real failure surfaces on writeFileSync below.
     }
-    writeFileSync(pluginPath, this.pluginSource())
+    const source = this.pluginSource()
+    writeFileSync(pluginPath, source)
+    this.writeTuiPlugin(pluginsDir, source)
   }
 
   private writePluginToConfigDir(configDir: string): void {
     const pluginsDir = join(configDir, 'plugins')
     mkdirSync(pluginsDir, { recursive: true })
-    writeFileSync(join(pluginsDir, this.pluginFileName), this.pluginSource())
+    const source = this.pluginSource()
+    writeFileSync(join(pluginsDir, this.pluginFileName), source)
+    this.writeTuiPlugin(pluginsDir, source)
+  }
+
+  private writeTuiPlugin(pluginsDir: string, source: string): void {
+    if (this.installsTuiPlugin) {
+      writeOpenCodeTuiPlugin(pluginsDir, this.pluginFileName, source)
+    }
   }
 }
 
@@ -298,7 +321,8 @@ export const openCode2HookService = new OpenCodeHookService({
   pluginFileName: 'orca-opencode2-status.js',
   legacyHooksDir: OPENCODE2_LEGACY_HOOKS_DIR,
   overlayDir: 'opencode2-config-overlays',
-  pluginSource: getOpenCode2PluginSource
+  pluginSource: getOpenCode2PluginSource,
+  installsTuiPlugin: true
 })
 export const _internals = {
   getOpenCodePluginSource,

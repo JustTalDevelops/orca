@@ -97,7 +97,7 @@ describe('OpenCode hook plugin source', () => {
     const digest = (source: string): string => createHash('sha256').update(source).digest('hex')
 
     expect(digest(getOpenCodePluginSource())).toBe(
-      'c81893814f08bfb2f9b5c133c5355b53d485982402d89e92ff15fc4e7d543079'
+      '7ca8891bb88e0814aa1cee859fd7a542fb94d8955ca03c74e9334e07180980be'
     )
     expect(
       digest(getOpenCodeFamilyPluginSource('/hook/mimo-code', { emitSessionStart: false }))
@@ -292,6 +292,18 @@ describe('OpenCodeHookService buildPtyEnv / clearPty round-trip', () => {
     const pluginSource = readFileSync(pluginPath, 'utf8')
     expect(pluginSource).toContain('OrcaOpenCodeStatusPlugin')
     expect(pluginSource).toContain('messageID: part.messageID')
+    // Why: OpenCode 2 reports pane lifecycle from each TUI, which loads only plugin directories.
+    const tuiEntry = join(
+      resolveOpenCodeConfigDirectory(),
+      'plugins',
+      'orca-opencode-status-tui',
+      'tui.js'
+    )
+    expect(readFileSync(tuiEntry, 'utf8')).toBe(pluginSource)
+    const past = new Date('2020-01-01T00:00:00Z')
+    utimesSync(tuiEntry, past, past)
+    service.buildPtyEnv(daemonSessionId)
+    expect(statSync(tuiEntry).mtimeMs).toBe(past.getTime())
   })
 
   // Why: #22234 — OpenCode 2 installs under the plain `opencode` name, and its loader
@@ -587,6 +599,21 @@ describe('OpenCodeHookService overlay mode (user OPENCODE_CONFIG_DIR set)', () =
     expect(overlayPlugin).toContain('OrcaOpenCodeStatusPlugin')
     expect(overlayPlugin).not.toBe(userOrcaSentinel)
     expectUserConfigIntact()
+  })
+
+  it('installs the TUI copy in the overlay without mirroring a user dir of the same name', () => {
+    const userTuiDir = join(userConfigDir, 'plugins', 'orca-opencode-status-tui')
+    mkdirSync(userTuiDir)
+    writeFileSync(join(userTuiDir, 'tui.js'), 'USER OWNED')
+
+    const env = new OpenCodeHookService().buildPtyEnv(ptyId, userConfigDir)
+
+    const overlayTui = join(env.OPENCODE_CONFIG_DIR!, 'plugins', 'orca-opencode-status-tui')
+    expect(lstatSync(overlayTui).isSymbolicLink()).toBe(false)
+    expect(readFileSync(join(overlayTui, 'tui.js'), 'utf8')).toBe(
+      readFileSync(join(env.OPENCODE_CONFIG_DIR!, 'plugins', 'orca-opencode-status.js'), 'utf8')
+    )
+    expect(readFileSync(join(userTuiDir, 'tui.js'), 'utf8')).toBe('USER OWNED')
   })
 
   it.skipIf(process.platform === 'win32')(
