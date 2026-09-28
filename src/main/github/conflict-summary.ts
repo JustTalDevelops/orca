@@ -12,15 +12,12 @@ import {
 import {
   __resetPRConflictSummaryDerivationCachesForTests,
   buildConflictSummaryCacheKey,
-  dedupeBaseOidResolve,
   dedupeSummaryDerivation,
   getConflictSummaryGitRuntimeKey,
   readCachedSummary,
-  readFreshBaseTipResolution,
-  rememberUnresolvedBaseTip,
-  storeResolvedBaseTip,
   storeCachedSummary
 } from './conflict-summary-cache'
+import { resolveLatestBaseOidThrottled } from './conflict-summary-base-tip'
 
 type LocalGitExecOptions = Pick<GitRuntimeOptions, 'wslDistro' | 'admissionTier'>
 
@@ -113,75 +110,6 @@ async function derivePRConflictSummary(
     storeCachedSummary(summaryKey, undefined)
     return undefined
   }
-}
-
-async function resolveLatestBaseOidThrottled(
-  repoPath: string,
-  baseRefName: string,
-  fallbackBaseOid: string,
-  localGitOptions: LocalGitExecOptions
-): Promise<string> {
-  const runtimeKey = getConflictSummaryGitRuntimeKey(localGitOptions.wslDistro)
-  const baseKey = buildConflictSummaryCacheKey(runtimeKey, repoPath, baseRefName)
-  const cachedResolution = readFreshBaseTipResolution(baseKey)
-  if (cachedResolution) {
-    return cachedResolution.kind === 'resolved' ? cachedResolution.oid : fallbackBaseOid
-  }
-  return dedupeBaseOidResolve(baseKey, async () => {
-    // Why re-check inside the dedupe slot: a sibling caller may have finished
-    // resolving between our cache read and this factory starting.
-    const freshResolution = readFreshBaseTipResolution(baseKey)
-    if (freshResolution) {
-      return freshResolution
-    }
-    const oid = await resolveLatestBaseOid(repoPath, baseRefName, localGitOptions)
-    if (oid) {
-      storeResolvedBaseTip(baseKey, oid)
-      return { kind: 'resolved', oid }
-    }
-    // Why cache the unresolved probe, not the caller fallback: the fetch
-    // attempt is branch-wide expensive work, but GitHub's baseRefOid is
-    // PR-specific and must not leak to sibling PRs on the same base branch.
-    rememberUnresolvedBaseTip(baseKey)
-    return { kind: 'fallback-unresolved' }
-  }).then((resolution) => (resolution.kind === 'resolved' ? resolution.oid : fallbackBaseOid))
-}
-
-async function resolveLatestBaseOid(
-  repoPath: string,
-  baseRefName: string,
-  localGitOptions: LocalGitExecOptions
-): Promise<string | null> {
-  const remoteName = 'origin'
-
-  try {
-    // Why: cap the fetch at 10 s so slow or unreachable remotes don't block
-    // the conflict-summary derivation indefinitely.
-    await gitExecFileAsync(['fetch', '--quiet', remoteName, baseRefName], {
-      ...gitOptionsForWorktree(repoPath, localGitOptions),
-      timeout: 10_000
-    })
-  } catch {
-    // Why: fetching the base ref keeps the conflict list aligned with GitHub's
-    // live mergeability view, but the card must still render offline. If fetch
-    // fails, fall back to the base OID GitHub already gave us.
-  }
-
-  for (const ref of [`refs/remotes/${remoteName}/${baseRefName}`, `${remoteName}/${baseRefName}`]) {
-    try {
-      const { stdout } = await gitExecFileAsync(['rev-parse', '--verify', ref], {
-        ...gitOptionsForWorktree(repoPath, localGitOptions)
-      })
-      const oid = stdout.trim()
-      if (oid) {
-        return oid
-      }
-    } catch {
-      // Try the next ref form before falling back to GitHub's baseRefOid.
-    }
-  }
-
-  return null
 }
 
 async function resolveMergeBase(

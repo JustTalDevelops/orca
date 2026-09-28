@@ -1,27 +1,17 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import {
   _resetWorktreeCreateRepoActivityForTests,
   hasWorktreeCreatesInFlight,
   holdRepoForWorktreeCreate,
-  isWorktreeCreateInFlight,
-  waitForWorktreeCreateIdle,
-  WORKTREE_CREATE_IDLE_WAIT_DEADLINE_MS
+  isWorktreeCreateInFlight
 } from './worktree-create-repo-activity'
 import { runLocalWorktreeCreate } from './worktree-create-git-executor'
+import { resolveGitAdmissionTier } from './command-runner/git-operation-executor'
 
 const REPO = { path: '/repos/app' }
 const OTHER_REPO = { path: '/repos/other' }
 
-function trackSettled(promise: Promise<void>): { settled: () => boolean } {
-  let settled = false
-  void promise.then(() => {
-    settled = true
-  })
-  return { settled: () => settled }
-}
-
 afterEach(() => {
-  vi.useRealTimers()
   _resetWorktreeCreateRepoActivityForTests()
 })
 
@@ -43,52 +33,21 @@ describe('worktree create repo activity', () => {
     release()
   })
 
-  it('resolves an idle wait immediately when nothing holds the repo', async () => {
-    await expect(waitForWorktreeCreateIdle(REPO.path)).resolves.toBeUndefined()
-  })
-
-  it('resolves an idle wait when the last hold is released', async () => {
+  it('holds only the repo being created in', () => {
     const release = holdRepoForWorktreeCreate(REPO)
-    const wait = trackSettled(waitForWorktreeCreateIdle(REPO.path))
-    await Promise.resolve()
-    expect(wait.settled()).toBe(false)
-    release()
-    await vi.waitFor(() => expect(wait.settled()).toBe(true))
-  })
-
-  it('waits for both of two concurrent creates on one repo', async () => {
-    const first = holdRepoForWorktreeCreate(REPO)
-    const second = holdRepoForWorktreeCreate(REPO)
-    const wait = trackSettled(waitForWorktreeCreateIdle(REPO.path))
-    first()
-    await Promise.resolve()
-    expect(wait.settled()).toBe(false)
-    second()
-    await vi.waitFor(() => expect(wait.settled()).toBe(true))
-  })
-
-  it('resolves at the deadline while creates keep the repo continuously held', async () => {
-    vi.useFakeTimers()
-    let release = holdRepoForWorktreeCreate(REPO)
-    const wait = trackSettled(waitForWorktreeCreateIdle(REPO.path))
-    // Back-to-back creates: the next one starts before the previous one ends.
-    for (let i = 0; i < 3; i += 1) {
-      const next = holdRepoForWorktreeCreate(REPO)
-      release()
-      release = next
-      await vi.advanceTimersByTimeAsync(WORKTREE_CREATE_IDLE_WAIT_DEADLINE_MS / 4)
-      expect(wait.settled()).toBe(false)
-    }
-    await vi.advanceTimersByTimeAsync(WORKTREE_CREATE_IDLE_WAIT_DEADLINE_MS / 4)
-    expect(wait.settled()).toBe(true)
-    expect(isWorktreeCreateInFlight(REPO.path)).toBe(true)
+    expect(isWorktreeCreateInFlight(OTHER_REPO.path)).toBe(false)
+    expect(hasWorktreeCreatesInFlight()).toBe(true)
     release()
   })
 
-  it('does not delay work on a different repo', async () => {
-    const release = holdRepoForWorktreeCreate(REPO)
-    await expect(waitForWorktreeCreateIdle(OTHER_REPO.path)).resolves.toBeUndefined()
-    release()
+  it('runs git inside the create at the interactive tier', async () => {
+    let tierDuringCreate: string | undefined
+    await runLocalWorktreeCreate(REPO, async () => {
+      tierDuringCreate = resolveGitAdmissionTier()
+    })
+    expect(tierDuringCreate).toBe('interactive')
+    // Why: detached work after the create must not keep its priority.
+    expect(resolveGitAdmissionTier()).toBe('status')
   })
 
   it.each([

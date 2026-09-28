@@ -18,11 +18,6 @@ import type { PRRefreshQueue, PRRefreshQueueEntry } from './pr-refresh-queue'
 import { prRefreshRateLimitPausedUntil } from './pr-refresh-rate-limit-gate'
 import type { PRRefreshRetryState } from './pr-refresh-retry-state'
 import type { PRRefreshVisibility } from './pr-refresh-visibility'
-import {
-  isWorktreeCreateInFlight,
-  waitForWorktreeCreateIdle,
-  WORKTREE_CREATE_IDLE_WAIT_DEADLINE_MS
-} from '../git/worktree-create-repo-activity'
 
 export class PRRefreshQueueDrainer {
   private draining = false
@@ -160,9 +155,6 @@ export class PRRefreshQueueDrainer {
           })
           continue
         }
-        if (isBackground(next.reason) && this.deferForWorktreeCreate(next)) {
-          continue
-        }
         const requestSequence = this.events.nextSequence()
         const requestStartedAt = Date.now()
         this.events.broadcast(
@@ -228,25 +220,6 @@ export class PRRefreshQueueDrainer {
     } finally {
       this.draining = false
     }
-  }
-
-  /** Requeues rather than awaiting: the drain is serial, so waiting here would stall every other repo. */
-  private deferForWorktreeCreate(entry: PRRefreshQueueEntry): boolean {
-    const { repoPath, connectionId } = entry.candidate
-    const deferredAt = entry.worktreeCreateDeferredAt ?? Date.now()
-    const deadline = deferredAt + WORKTREE_CREATE_IDLE_WAIT_DEADLINE_MS
-    if (connectionId || !isWorktreeCreateInFlight(repoPath) || Date.now() >= deadline) {
-      return false
-    }
-    const deferred = { ...entry, dueAt: deadline, worktreeCreateDeferredAt: deferredAt }
-    this.queue.set(entry.key, deferred)
-    void waitForWorktreeCreateIdle(repoPath, deadline - Date.now()).then(() => {
-      if (this.queue.get(entry.key) === deferred) {
-        deferred.dueAt = Math.min(deferred.dueAt, Date.now())
-      }
-      this.schedule(0)
-    })
-    return true
   }
 
   private notePacingDelay(entry: PRRefreshQueueEntry): void {

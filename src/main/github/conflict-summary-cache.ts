@@ -51,15 +51,25 @@ export function buildConflictSummaryCacheKey(...parts: string[]): string {
 }
 
 export function readFreshBaseTipResolution(baseKey: string): FreshBaseTipResolution | null {
+  const entry = readLastBaseTipResolution(baseKey)
+  if (!entry || Date.now() - entry.resolvedAt >= CONFLICT_SUMMARY_BASE_FETCH_WINDOW_MS) {
+    return null
+  }
+  return entry.resolution
+}
+
+/** The last resolution at any age; an expired entry stays until evicted by the size cap. */
+export function readLastBaseTipResolution(
+  baseKey: string
+): { resolution: FreshBaseTipResolution; resolvedAt: number } | null {
   const entry = baseOidCache.get(baseKey)
   if (!entry) {
     return null
   }
-  if (Date.now() - entry.resolvedAt >= CONFLICT_SUMMARY_BASE_FETCH_WINDOW_MS) {
-    baseOidCache.delete(baseKey)
-    return null
+  return {
+    resolution: entry.oid ? { kind: 'resolved', oid: entry.oid } : { kind: 'fallback-unresolved' },
+    resolvedAt: entry.resolvedAt
   }
-  return entry.oid ? { kind: 'resolved', oid: entry.oid } : { kind: 'fallback-unresolved' }
 }
 
 export function storeResolvedBaseTip(baseKey: string, oid: string): void {
