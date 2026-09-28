@@ -211,10 +211,11 @@ export async function finalizePreparedWorktree(
       if (targetResult.status === 'rejected') {
         throw targetResult.reason
       }
+      const { baseContext, targetHead } = targetResult.value
       if (preparedResult.status === 'rejected') {
+        await baseContext.pendingLocalBaseRefRefresh
         throw preparedResult.reason
       }
-      const { baseContext, targetHead } = targetResult.value
       const preparedHeadOutput = preparedResult.value.stdout
       if (preparedHeadOutput.trim() !== targetHead) {
         await gitExecFileAsync(
@@ -275,12 +276,13 @@ export async function finalizePreparedWorktree(
           moved,
           finalizeGitOptions
         )
+        await baseContext.pendingLocalBaseRefRefresh
         throw error
       }
+      // Why: the refresh overlapped the finalize above; it has no bearing on the checkout's content.
+      const localBaseRefRefresh = await baseContext.pendingLocalBaseRefRefresh
       return {
-        ...(baseContext.localBaseRefRefresh
-          ? { localBaseRefRefresh: baseContext.localBaseRefRefresh }
-          : {}),
+        ...(localBaseRefRefresh ? { localBaseRefRefresh } : {}),
         ...(baseContext.localBaseRefUpdateSuggestion
           ? { localBaseRefUpdateSuggestion: baseContext.localBaseRefUpdateSuggestion }
           : {})

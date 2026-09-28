@@ -21,9 +21,11 @@ import type {
 import { gitExecOptions, resolveWorktreeAddTimeoutMs } from './worktree-operation-options'
 import { bumpWorktreeScanGeneration } from './worktree-scan-cache'
 
-export type WorktreeAddBaseContext = AddWorktreeResult & {
+export type WorktreeAddBaseContext = Pick<AddWorktreeResult, 'localBaseRefUpdateSuggestion'> & {
   effectiveBase: string
   effectiveBaseOid?: string
+  /** Started, not awaited: the worktree is created from the remote-tracking commit, so the refresh can overlap the checkout. Never rejects. */
+  pendingLocalBaseRefRefresh?: Promise<LocalBaseRefRefreshResult | undefined>
 }
 
 export async function resolveWorktreeAddBaseContext(
@@ -37,14 +39,18 @@ export async function resolveWorktreeAddBaseContext(
     effectiveBaseOid = await resolveWorktreeBaseCommitOid(repoPath, qualifiedRef, options)
     return effectiveBaseOid !== null
   })
-  const localBaseRefRefresh = refreshLocalBaseRef
-    ? await refreshLocalBaseRefForWorktreeCreate(
+  const pendingLocalBaseRefRefresh = refreshLocalBaseRef
+    ? refreshLocalBaseRefForWorktreeCreate(
         repoPath,
         baseBranch,
         effectiveBase,
         options.remoteTrackingBase,
         options
-      )
+      ).catch((error: unknown) => {
+        // Why: the create may already have succeeded by the time this settles; a refresh bug must not fail it.
+        console.warn('addWorktree: local base ref refresh failed unexpectedly', error)
+        return undefined
+      })
     : undefined
   const localBaseRefUpdateSuggestion =
     !refreshLocalBaseRef && options.suggestLocalBaseRefUpdate
@@ -62,7 +68,7 @@ export async function resolveWorktreeAddBaseContext(
     ...(!refreshLocalBaseRef && !options.suggestLocalBaseRefUpdate && effectiveBaseOid
       ? { effectiveBaseOid }
       : {}),
-    ...(localBaseRefRefresh ? { localBaseRefRefresh } : {}),
+    ...(pendingLocalBaseRefRefresh ? { pendingLocalBaseRefRefresh } : {}),
     ...(localBaseRefUpdateSuggestion ? { localBaseRefUpdateSuggestion } : {})
   }
 }
@@ -184,7 +190,7 @@ async function performAddWorktree(
   noCheckout = false,
   options: AddWorktreeOptions = {}
 ): Promise<AddWorktreeResult> {
-  let localBaseRefRefresh: LocalBaseRefRefreshResult | undefined
+  let pendingLocalBaseRefRefresh: Promise<LocalBaseRefRefreshResult | undefined> | undefined
   let localBaseRefUpdateSuggestion: LocalBaseRefUpdateSuggestion | undefined
   // Why: enable long paths for this Windows checkout without changing user Git config.
   const args = [...windowsLongPathGitArgs(repoPath), 'worktree', 'add']
@@ -206,7 +212,7 @@ async function performAddWorktree(
         options
       )
       effectiveBase = baseContext.effectiveBase
-      localBaseRefRefresh = baseContext.localBaseRefRefresh
+      pendingLocalBaseRefRefresh = baseContext.pendingLocalBaseRefRefresh
       localBaseRefUpdateSuggestion = baseContext.localBaseRefUpdateSuggestion
       args.push(effectiveBase)
     }
@@ -217,6 +223,10 @@ async function performAddWorktree(
       // Why: resolve per call — hoisting this to a module const would freeze the override at import.
       timeout: resolveWorktreeAddTimeoutMs()
     })
+  } catch (error) {
+    // Why: settle the overlapped refresh inside the caller's ref-maintenance pause before reporting the failure.
+    await pendingLocalBaseRefRefresh
+    throw error
   } finally {
     // Git may have written the target's `.git` marker even when it reports a late
     // failure, so drop any pre-create route before the follow-up commands route.
@@ -224,7 +234,7 @@ async function performAddWorktree(
   }
 
   if (options.checkoutExistingBranch) {
-    return localBaseRefRefresh ? { localBaseRefRefresh } : {}
+    return {}
   }
 
   if (effectiveBase) {
@@ -237,6 +247,7 @@ async function performAddWorktree(
   // linked worktree writes the shared common-dir config (whole repo) — intentional and idempotent,
   // so it's warn-only and not rolled back on failure.
   await configurePushAutoSetupRemote(worktreePath, options)
+  const localBaseRefRefresh = await pendingLocalBaseRefRefresh
   return {
     ...(localBaseRefRefresh ? { localBaseRefRefresh } : {}),
     ...(localBaseRefUpdateSuggestion ? { localBaseRefUpdateSuggestion } : {})

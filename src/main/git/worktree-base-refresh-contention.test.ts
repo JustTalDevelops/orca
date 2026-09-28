@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { gitExecFileAsyncMock } = vi.hoisted(() => ({ gitExecFileAsyncMock: vi.fn() }))
+const { gitExecFileAsyncMock } = vi.hoisted(() => ({
+  gitExecFileAsyncMock:
+    vi.fn<(args: string[], opts: { cwd: string }) => Promise<{ stdout: string }>>()
+}))
 
 vi.mock('./runner', () => ({
   gitExecFileAsync: gitExecFileAsyncMock,
@@ -56,7 +59,7 @@ function refresh() {
 
 function mutationCalls(): string[][] {
   return gitExecFileAsyncMock.mock.calls
-    .map(([args]) => args as string[])
+    .map(([args]) => args)
     .filter(([command]) => command === 'reset' || command === 'update-ref')
 }
 
@@ -94,7 +97,7 @@ describe('refreshLocalBaseRefForWorktreeCreate lock contention', () => {
     installGitFake({ owner: true, mutate })
     let statusReads = 0
     const base = gitExecFileAsyncMock.getMockImplementation()!
-    gitExecFileAsyncMock.mockImplementation(async (args: string[], opts: unknown) => {
+    gitExecFileAsyncMock.mockImplementation(async (args: string[], opts: { cwd: string }) => {
       if (args[0] === 'status') {
         statusReads += 1
         // Evaluation and the first attempt see a clean owner; it is dirty by the retry.
@@ -172,11 +175,94 @@ describe('refreshLocalBaseRefForWorktreeCreate lock contention', () => {
   it('skips the owner check and reset when local is already current', async () => {
     installGitFake({ owner: true, mutate: () => Promise.resolve({ stdout: '' }) })
     const base = gitExecFileAsyncMock.getMockImplementation()!
-    gitExecFileAsyncMock.mockImplementation(async (args: string[], opts: unknown) =>
+    gitExecFileAsyncMock.mockImplementation(async (args: string[], opts: { cwd: string }) =>
       args[0] === 'rev-list' ? { stdout: '0\t0\n' } : base(args, opts)
     )
 
     await expect(refresh()).resolves.toBeUndefined()
     expect(gitExecFileAsyncMock.mock.calls.map(([args]) => args[0])).toEqual(['rev-list'])
+  })
+})
+
+describe('refreshLocalBaseRefForWorktreeCreate runs one refresh at a time per repo', () => {
+  beforeEach(() => {
+    gitExecFileAsyncMock.mockReset()
+  })
+
+  function installRepoFake(repoPath: string) {
+    let localOid = 'old-main'
+    let finishReset!: () => void
+    const resetStarted = new Promise<void>((resolve) => {
+      gitExecFileAsyncMock.mockImplementation(async (args: string[], opts: { cwd: string }) => {
+        const [command] = args
+        if (opts.cwd !== repoPath) {
+          return { stdout: command === 'rev-list' ? '0\t0\n' : '' }
+        }
+        if (command === 'rev-list') {
+          return { stdout: localOid === 'remote-main' ? '0\t0\n' : '0\t3\n' }
+        }
+        if (command === 'rev-parse') {
+          return { stdout: args[2]?.startsWith('refs/heads/') ? `${localOid}\n` : 'remote-main\n' }
+        }
+        if (command === 'worktree') {
+          return { stdout: `worktree ${repoPath}\nHEAD ${localOid}\nbranch refs/heads/main\n` }
+        }
+        if (command === 'reset') {
+          resolve()
+          await new Promise<void>((release) => {
+            finishReset = release
+          })
+          localOid = 'remote-main'
+        }
+        return { stdout: '' }
+      })
+    })
+    return { resetStarted, finishReset: () => finishReset() }
+  }
+
+  it('lets a second create see the first refresh and skip its own reset', async () => {
+    const repo = installRepoFake('/repo')
+
+    const first = refreshLocalBaseRefForWorktreeCreate(
+      '/repo',
+      'origin/main',
+      'refs/remotes/origin/main'
+    )
+    const second = refreshLocalBaseRefForWorktreeCreate(
+      '/repo/',
+      'origin/main',
+      'refs/remotes/origin/main'
+    )
+    await repo.resetStarted
+    const callsWhileFirstResets = gitExecFileAsyncMock.mock.calls.length
+    repo.finishReset()
+
+    await expect(first).resolves.toMatchObject({ status: 'updated' })
+    await expect(second).resolves.toBeUndefined()
+    const commands = gitExecFileAsyncMock.mock.calls.map(([args]) => args[0])
+    // The second refresh issued nothing while the first held the checkout, then only its drift probe.
+    expect(commands.slice(0, callsWhileFirstResets).filter((c) => c === 'rev-list')).toHaveLength(1)
+    expect(commands.slice(callsWhileFirstResets)).toEqual(['rev-list'])
+    expect(mutationCalls()).toHaveLength(1)
+  })
+
+  it('does not queue refreshes of different repos behind each other', async () => {
+    const repo = installRepoFake('/repo')
+
+    const first = refreshLocalBaseRefForWorktreeCreate(
+      '/repo',
+      'origin/main',
+      'refs/remotes/origin/main'
+    )
+    await repo.resetStarted
+    const other = refreshLocalBaseRefForWorktreeCreate(
+      '/other',
+      'origin/main',
+      'refs/remotes/origin/main'
+    )
+
+    await expect(other).resolves.toBeUndefined()
+    repo.finishReset()
+    await expect(first).resolves.toMatchObject({ status: 'updated' })
   })
 })

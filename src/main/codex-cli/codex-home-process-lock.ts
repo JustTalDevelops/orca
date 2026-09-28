@@ -1,6 +1,7 @@
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { normalizeRuntimePathForComparison } from '../../shared/cross-platform-path'
+import { createKeyedSerialRunner } from '../../shared/keyed-serial-runner'
 
 // Why: Codex OAuth uses rotating refresh tokens stored in each home's auth.json.
 // Two Orca-spawned codex processes refreshing the same home concurrently can
@@ -8,7 +9,7 @@ import { normalizeRuntimePathForComparison } from '../../shared/cross-platform-p
 // so Orca's own spawns (quota probes, commit-message runs) serialize per home.
 // User terminal panes are intentionally not serialized here.
 
-const lockTails = new Map<string, Promise<unknown>>()
+const runPerCodexHome = createKeyedSerialRunner()
 
 export function resolveCodexHomeProcessLockKey(codexHomePath?: string | null): string {
   const home = codexHomePath ?? process.env.CODEX_HOME ?? join(homedir(), '.codex')
@@ -41,18 +42,5 @@ export function resolveCodexHomeProcessLockKeyForSpawnEnv(
 }
 
 export function withCodexHomeProcessLock<T>(lockKey: string, fn: () => Promise<T>): Promise<T> {
-  const prior = lockTails.get(lockKey) ?? Promise.resolve()
-  const run = prior.then(fn)
-  // Why: keep the queue alive past a failed run so later entrants still start.
-  const tail = run.then(
-    () => undefined,
-    () => undefined
-  )
-  lockTails.set(lockKey, tail)
-  void tail.then(() => {
-    if (lockTails.get(lockKey) === tail) {
-      lockTails.delete(lockKey)
-    }
-  })
-  return run
+  return runPerCodexHome(lockKey, fn)
 }

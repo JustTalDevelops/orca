@@ -3,7 +3,7 @@ import { beforeEach, expect, it, vi } from 'vitest'
 const gitExec = vi.hoisted(() => vi.fn())
 vi.mock('./runner', () => ({ gitExecFileAsync: gitExec }))
 vi.mock('./worktree-base-refresh', () => ({
-  refreshLocalBaseRefForWorktreeCreate: vi.fn(),
+  refreshLocalBaseRefForWorktreeCreate: vi.fn(async () => undefined),
   getLocalBaseRefUpdateSuggestionForWorktreeCreate: vi.fn()
 }))
 vi.mock('./status', () => ({ runWithGitReadCacheInvalidation: (run: () => unknown) => run() }))

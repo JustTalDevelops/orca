@@ -178,6 +178,8 @@ import {
 } from '../worktree-name-retirement'
 import { createRetiredNameLookup } from '../../shared/worktree/retired-name-registry'
 import { retryOnGitLockContention } from '../../shared/git-lock-contention'
+import { createKeyedSerialRunner } from '../../shared/keyed-serial-runner'
+import { LOCAL_BASE_REF_REFRESH_QUEUE_MAX_WAIT_MS } from '../git/worktree-base-refresh'
 
 const SSH_WORKTREE_CREATE_FETCH_FRESHNESS_MS = 30_000
 const SSH_WORKTREE_CREATE_FETCH_CACHE_MAX = 512
@@ -1665,7 +1667,22 @@ export async function prefetchRemoteWorktreeCreateBase(
   await fetchRemoteForWorktreeCreate(provider, repo, 'origin')
 }
 
-async function refreshLocalBaseRefForRemoteWorktreeCreate(
+const runPerRemoteRepo = createKeyedSerialRunner({
+  maxWaitMs: LOCAL_BASE_REF_REFRESH_QUEUE_MAX_WAIT_MS
+})
+
+function refreshLocalBaseRefForRemoteWorktreeCreate(
+  provider: SshGitProvider,
+  repo: Repo,
+  remoteTrackingBase: RemoteTrackingBase
+): Promise<LocalBaseRefRefreshResult | undefined> {
+  // Why: two creates racing to reset the same remote checkout collide on index.lock; queued, the second finds local already current.
+  return runPerRemoteRepo(`${repo.connectionId}\0${repo.path}`, () =>
+    performRemoteLocalBaseRefRefresh(provider, repo.path, remoteTrackingBase)
+  )
+}
+
+async function performRemoteLocalBaseRefRefresh(
   provider: SshGitProvider,
   repoPath: string,
   remoteTrackingBase: RemoteTrackingBase
@@ -2108,9 +2125,15 @@ export async function createRemoteWorktree(
     }
   }
 
-  const localBaseRefRefresh =
+  // Why: started, not awaited — the relay adds from the remote-tracking ref, so the refresh overlaps the checkout.
+  const pendingLocalBaseRefRefresh =
     settings.refreshLocalBaseRefOnWorktreeCreate && !checkoutExistingBranch && remoteTrackingBase
-      ? await refreshLocalBaseRefForRemoteWorktreeCreate(provider, repo.path, remoteTrackingBase)
+      ? refreshLocalBaseRefForRemoteWorktreeCreate(provider, repo, remoteTrackingBase).catch(
+          (error: unknown) => {
+            console.warn('[worktree-create] local base ref refresh failed unexpectedly', error)
+            return undefined
+          }
+        )
       : undefined
   const localBaseRefUpdateSuggestion =
     !settings.refreshLocalBaseRefOnWorktreeCreate &&
@@ -2135,6 +2158,7 @@ export async function createRemoteWorktree(
   // (#17828) instead of paying it at create time for a read-only review.
   const preparedPushTarget: GitPushTarget | undefined = args.pushTarget
 
+  let localBaseRefRefresh: LocalBaseRefRefreshResult | undefined
   try {
     await timing.time('git_worktree_add', async () =>
       provider.addWorktree(
@@ -2158,6 +2182,9 @@ export async function createRemoteWorktree(
       )
     }
     throw err
+  } finally {
+    // Why: a sparse rollback below must not race a refresh still resetting the owner checkout.
+    localBaseRefRefresh = await pendingLocalBaseRefRefresh
   }
   // Why: the worktree is listable from here on; a scan that began before it appeared is overtaken.
   runWorktreeChangeInvalidators(repo.id)

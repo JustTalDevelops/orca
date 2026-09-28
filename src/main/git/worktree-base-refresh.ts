@@ -1,5 +1,7 @@
 import type { LocalBaseRefRefreshResult } from '../../shared/worktree/base-ref-drift-types'
+import { normalizeRuntimePathForComparison } from '../../shared/cross-platform-path'
 import { retryOnGitLockContention } from '../../shared/git-lock-contention'
+import { createKeyedSerialRunner } from '../../shared/keyed-serial-runner'
 import { gitExecFileAsync, translateWslOutputPaths } from './runner'
 import {
   evaluateLocalBaseRefRefreshability,
@@ -11,12 +13,30 @@ import { gitExecOptions } from './worktree-operation-options'
 
 export { getLocalBaseRefUpdateSuggestionForWorktreeCreate }
 
-export async function refreshLocalBaseRefForWorktreeCreate(
+// Why: a refresh wedged in git must not hold every later create of the repo; past this, the next one runs and lock retry covers the overlap.
+export const LOCAL_BASE_REF_REFRESH_QUEUE_MAX_WAIT_MS = 30_000
+const runPerRepo = createKeyedSerialRunner({ maxWaitMs: LOCAL_BASE_REF_REFRESH_QUEUE_MAX_WAIT_MS })
+
+export function refreshLocalBaseRefForWorktreeCreate(
   repoPath: string,
   baseBranch: string,
   remoteTrackingRef: string,
   remoteTrackingBase?: AddWorktreeOptions['remoteTrackingBase'],
   options: GitWorktreeExecOptions = {}
+): Promise<LocalBaseRefRefreshResult | undefined> {
+  // Why: two creates racing to reset the same checkout collide on index.lock; queued, the second sees local already current and does nothing.
+  const repoKey = `${options.wslDistro ?? ''}\0${normalizeRuntimePathForComparison(repoPath)}`
+  return runPerRepo(repoKey, () =>
+    performLocalBaseRefRefresh(repoPath, baseBranch, remoteTrackingRef, remoteTrackingBase, options)
+  )
+}
+
+async function performLocalBaseRefRefresh(
+  repoPath: string,
+  baseBranch: string,
+  remoteTrackingRef: string,
+  remoteTrackingBase: AddWorktreeOptions['remoteTrackingBase'],
+  options: GitWorktreeExecOptions
 ): Promise<LocalBaseRefRefreshResult | undefined> {
   const evaluation = await evaluateLocalBaseRefRefreshability(
     repoPath,
