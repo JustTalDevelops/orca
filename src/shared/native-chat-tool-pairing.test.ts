@@ -60,6 +60,15 @@ describe('pairNativeChatToolResults', () => {
     expect(resultByCall.get(shell)).toBe(ran)
   })
 
+  it('leaves a result that names a call not in the run unpaired, rather than give it to another', () => {
+    const waiting: NativeChatToolCallBlock = { ...call('spawn'), callId: 's' }
+    const stray: NativeChatToolResultBlock = { ...result('elsewhere'), callId: 'missing' }
+    const { resultByCall, pairedResults } = pairNativeChatToolResults([waiting, stray])
+
+    expect(resultByCall.has(waiting)).toBe(false)
+    expect(pairedResults.has(stray)).toBe(false)
+  })
+
   it('ignores blocks that are neither a call nor a result', () => {
     const text: NativeChatBlock = { type: 'text', text: 'hi' }
     const [a, ra] = [call('a'), result('r')]

@@ -7,11 +7,12 @@
 // as the command that produced it. Pairing lets the call own its output, so the
 // run reads as the work it did.
 //
-// A result that names its call answers that call. One that does not is paired
-// positionally, the same FIFO rule `dropUnattributableToolResults` already uses to
-// decide a result is attributable at all: it answers the oldest call that has not
-// been answered yet. Position alone misattributes every later result once one call
-// finishes with no output, which is why a producer that knows the call names it.
+// A result that names its call answers that call, and no other: one naming a call
+// that is not waiting (outside a bounded window, say) stays unpaired. One that names
+// none is paired positionally, the same FIFO rule `dropUnattributableToolResults`
+// already uses to decide a result is attributable at all: it answers the oldest call
+// that has not been answered yet. Position alone misattributes every later result once
+// one call finishes with no output, which is why a producer that knows the call names it.
 
 import {
   isToolCallBlock,
@@ -33,6 +34,18 @@ export const NO_NATIVE_CHAT_TOOL_PAIRING: NativeChatToolPairing = {
   pairedResults: new Set()
 }
 
+/** Where in `unanswered` (oldest first) the call `result` answers is, or -1 for none. */
+export function answeredToolCallIndex<T>(
+  unanswered: readonly T[],
+  result: NativeChatToolResultBlock,
+  callIdOf: (entry: T) => string | undefined
+): number {
+  if (result.callId === undefined) {
+    return unanswered.length > 0 ? 0 : -1
+  }
+  return unanswered.findIndex((entry) => callIdOf(entry) === result.callId)
+}
+
 export function pairNativeChatToolResults(
   blocks: readonly NativeChatBlock[]
 ): NativeChatToolPairing {
@@ -47,9 +60,8 @@ export function pairNativeChatToolResults(
     if (!isToolResultBlock(block)) {
       continue
     }
-    const named =
-      block.callId === undefined ? -1 : unanswered.findIndex((call) => call.callId === block.callId)
-    const [call] = unanswered.splice(named === -1 ? 0 : named, 1)
+    const answered = answeredToolCallIndex(unanswered, block, (call) => call.callId)
+    const [call] = answered === -1 ? [] : unanswered.splice(answered, 1)
     if (call === undefined) {
       continue
     }

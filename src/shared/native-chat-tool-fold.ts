@@ -11,6 +11,7 @@ import {
 import { agentJournalItemSubagentId } from './agent-session-journal-producer'
 import { isKnownHarnessInjectedUserTurnText } from './harness-injected-user-turns'
 import { isNoiseMessage } from './native-chat-noise'
+import { answeredToolCallIndex } from './native-chat-tool-pairing'
 
 function isToolOnlyMessage(message: NativeChatMessage): boolean {
   return (
@@ -153,8 +154,8 @@ export type NativeChatToolPair = {
   result?: NativeChatToolResultBlock
 }
 
-/** Pair each result with the call it names, else with the oldest unanswered call: the rule
- *  `pairNativeChatToolResults` uses, so every reader of a run agrees on who owns an output. */
+/** Pair results to calls by `answeredToolCallIndex`, the rule `pairNativeChatToolResults` uses,
+ *  so every reader of a run agrees on who owns an output. */
 export function pairToolBlocks(
   blocks: readonly NativeChatBlock[],
   limit = Infinity
@@ -176,11 +177,8 @@ export function pairToolBlocks(
     if (block.type !== 'tool-result') {
       continue
     }
-    const named =
-      block.callId === undefined
-        ? -1
-        : callSlots.findIndex((slot) => pairs[slot]?.call?.callId === block.callId)
-    const [slot] = callSlots.splice(named === -1 ? 0 : named, 1)
+    const answered = answeredToolCallIndex(callSlots, block, (slot) => pairs[slot]?.call?.callId)
+    const [slot] = answered === -1 ? [] : callSlots.splice(answered, 1)
     if (slot === undefined) {
       if (pairs.length < limit) {
         pairs.push({ result: block })

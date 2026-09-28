@@ -98,6 +98,22 @@ describe('tool pair limits', () => {
     ])
   })
 
+  it('gives no retained call the output of a call past the limit', () => {
+    const named = (callId: string): NativeChatBlock => ({
+      type: 'tool-call',
+      name: 'Bash',
+      input: {},
+      callId
+    })
+    const [spawn, shell, later] = [named('s'), named('x'), named('y')]
+    const ran: NativeChatBlock = { type: 'tool-result', output: 'x', callId: 'x' }
+    const laterRan: NativeChatBlock = { type: 'tool-result', output: 'y', callId: 'y' }
+    expect(pairToolBlocks([spawn, shell, ran, later, laterRan], 2)).toEqual([
+      { call: spawn },
+      { call: shell, result: ran }
+    ])
+  })
+
   it('keeps a leading stray result and then stops at the limit', () => {
     const blocks = [result, call, result, call, result]
     expect(pairToolBlocks(blocks, 1)).toEqual(original(blocks, 1))
