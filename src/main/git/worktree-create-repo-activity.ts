@@ -1,6 +1,4 @@
 import { normalizeRuntimePathForComparison } from '../../shared/cross-platform-path'
-import { resolveGitAdmissionTier } from './command-runner/git-operation-executor'
-import type { GitAdmissionTier } from './command-runner/git-exec-options'
 
 /**
  * Which repositories have a worktree create in flight.
@@ -100,26 +98,6 @@ export function waitForWorktreeCreateIdle(
     timer.unref?.()
     waiters.add(wake)
   })
-}
-
-/**
- * The producer-side gate: only work at the `background` tier waits, so a user
- * action (and anything the create itself runs) never queues behind a create.
- * Null when there is nothing to wait for (including a path Orca cannot map to
- * a repo), so the idle path stays synchronous.
- */
-export function backgroundGitWaitForWorktreeCreate(
-  repoPath: string | undefined,
-  admissionTier?: GitAdmissionTier
-): Promise<void> | null {
-  if (
-    repoPath === undefined ||
-    resolveGitAdmissionTier(admissionTier) !== 'background' ||
-    !isWorktreeCreateInFlight(repoPath)
-  ) {
-    return null
-  }
-  return waitForWorktreeCreateIdle(repoPath)
 }
 
 export function _resetWorktreeCreateRepoActivityForTests(): void {

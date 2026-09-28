@@ -9,12 +9,7 @@ import {
   SSH_GIT_PROVIDER_UNAVAILABLE_MESSAGE
 } from '../../../providers/ssh-git-dispatch'
 import { resolveRegisteredWorktreePath } from '../../registered-worktree-roots-cache'
-import {
-  getLocalGitOptionsForRegisteredWorktree,
-  getLocalGitOptionsForRepo,
-  getLocalRepoForRegisteredWorktree
-} from '../../local-worktree-runtime-options'
-import { backgroundGitWaitForWorktreeCreate } from '../../../git/worktree-create-repo-activity'
+import { getLocalGitOptionsForRegisteredWorktree } from '../../local-worktree-runtime-options'
 import { validateFullGitObjectId } from '../../filesystem-path-containment'
 import type { FilesystemHandlerContext } from '../filesystem-handler-context'
 import type { GitAdmissionTier } from '../../../git/command-runner/git-exec-options'
@@ -45,9 +40,11 @@ export function registerGitRemoteCompareHandlers(context: FilesystemHandlerConte
           : provider.getBranchCompare(args.worktreePath, args.baseRef)
       }
       const worktreePath = await resolveRegisteredWorktreePath(args.worktreePath, store)
-      const repo = getLocalRepoForRegisteredWorktree(store, args.worktreePath, worktreePath)
-      await backgroundGitWaitForWorktreeCreate(repo?.path, args.admissionTier)
-      const gitOptions = getLocalGitOptionsForRepo(store, repo)
+      const gitOptions = getLocalGitOptionsForRegisteredWorktree(
+        store,
+        args.worktreePath,
+        worktreePath
+      )
       return getBranchCompare(worktreePath, args.baseRef, {
         ...gitOptions,
         ...(args.admissionTier ? { admissionTier: args.admissionTier } : {})

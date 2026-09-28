@@ -13,7 +13,18 @@ vi.mock('./github-api-repository', () =>
 vi.mock('./rate-limit', () => moduleMocks.rateLimitModuleMock(coordinatorMocks))
 vi.mock('../ipc/ui', () => moduleMocks.ipcUiModuleMock(coordinatorMocks))
 
+const gitExecFileAsyncMock = vi.hoisted(() => vi.fn())
+vi.mock('../git/runner', () => ({ gitExecFileAsync: gitExecFileAsyncMock }))
+
 import { makeCandidate } from './pr-refresh-coordinator-test-harness'
+import type { GitAdmissionTier } from '../git/command-runner/git-exec-options'
+
+const gitOutputs: Record<string, string> = {
+  'rev-parse': 'base-tip\n',
+  'merge-base': 'merge-base\n',
+  'rev-list': '2\n',
+  'merge-tree': 'tree-oid\u0000src/conflict.ts\u0000'
+}
 
 const { getPRForBranchOutcomeMock } = coordinatorMocks
 
@@ -25,6 +36,10 @@ describe('PR refresh queue while a worktree create is in flight', () => {
   beforeEach(() => {
     moduleMocks.resetPRRefreshCoordinatorMocks(coordinatorMocks)
     getPRForBranchOutcomeMock.mockResolvedValue({ kind: 'no-pr', fetchedAt: Date.now() })
+    gitExecFileAsyncMock.mockReset()
+    gitExecFileAsyncMock.mockImplementation(async (argv: string[]) => ({
+      stdout: gitOutputs[argv[0]] ?? ''
+    }))
   })
 
   afterEach(() => {
@@ -57,6 +72,55 @@ describe('PR refresh queue while a worktree create is in flight', () => {
     release()
     await vi.advanceTimersByTimeAsync(0)
     expect(refreshedRepoPaths()).toEqual(['/other', '/repo'])
+  })
+
+  it('lets a refresh already running when a create starts finish without stalling other repos', async () => {
+    const { enqueuePRRefresh } = await import('./pr-refresh-coordinator')
+    const { holdRepoForWorktreeCreate } = await import('../git/worktree-create-repo-activity')
+    const { getPRConflictSummary } = await import('./conflict-summary')
+    let release = (): void => {}
+    let summary: unknown
+    getPRForBranchOutcomeMock.mockImplementation(
+      async (
+        repoPath: string,
+        _branch: string,
+        _linkedPR: number | null,
+        _connectionId: string | null,
+        _fallbackPR: number | null,
+        options?: { localGitExecOptions?: { admissionTier?: GitAdmissionTier } }
+      ) => {
+        if (repoPath === '/repo') {
+          // The create begins after this background refresh has already started.
+          release = holdRepoForWorktreeCreate({ path: '/repo' })
+          summary = await getPRConflictSummary(
+            '/repo',
+            'main',
+            'github-base-oid',
+            'head-oid',
+            options?.localGitExecOptions
+          )
+        }
+        return { kind: 'no-pr', fetchedAt: Date.now() }
+      }
+    )
+
+    enqueuePRRefresh(makeCandidate(), 'swr')
+    enqueuePRRefresh(
+      makeCandidate({
+        repoPath: '/other',
+        repoId: 'repo-2',
+        worktreeId: 'wt-2',
+        cacheKey: '/other::feature/test'
+      }),
+      'swr'
+    )
+    await vi.advanceTimersByTimeAsync(0)
+    expect(summary).toMatchObject({ files: ['src/conflict.ts'] })
+
+    // One background spacing later, well inside the create deadline.
+    await vi.advanceTimersByTimeAsync(15_000)
+    expect(refreshedRepoPaths()).toEqual(['/repo', '/other'])
+    release()
   })
 
   it('runs a manual refresh on the held repo immediately', async () => {
