@@ -153,16 +153,17 @@ export type NativeChatToolPair = {
   result?: NativeChatToolResultBlock
 }
 
-/** Pair calls and results by FIFO ordinal because transcript blocks carry no tool ids. */
+/** Pair each result with the call it names, else with the oldest unanswered call: the rule
+ *  `pairNativeChatToolResults` uses, so every reader of a run agrees on who owns an output. */
 export function pairToolBlocks(
   blocks: readonly NativeChatBlock[],
   limit = Infinity
 ): NativeChatToolPair[] {
   const pairs: NativeChatToolPair[] = []
+  /** Slots of retained calls not yet answered, oldest first. */
   const callSlots: number[] = []
-  let resultOrdinal = 0
   for (const block of blocks) {
-    if (pairs.length >= limit && resultOrdinal >= callSlots.length) {
+    if (pairs.length >= limit && callSlots.length === 0) {
       break
     }
     if (block.type === 'tool-call') {
@@ -175,13 +176,16 @@ export function pairToolBlocks(
     if (block.type !== 'tool-result') {
       continue
     }
-    const slot = callSlots[resultOrdinal]
+    const named =
+      block.callId === undefined
+        ? -1
+        : callSlots.findIndex((slot) => pairs[slot]?.call?.callId === block.callId)
+    const [slot] = callSlots.splice(named === -1 ? 0 : named, 1)
     if (slot === undefined) {
       if (pairs.length < limit) {
         pairs.push({ result: block })
       }
     } else {
-      resultOrdinal += 1
       pairs[slot]!.result = block
     }
   }
