@@ -210,6 +210,15 @@ describe('mobile markdown bridge', () => {
         }
       })
       expect(response).toHaveProperty('result.content', prefix)
+      const save = await sendRequest({
+        id: 'save-truncated',
+        operation: 'save',
+        worktreeId: 'wt-1',
+        tabId: 'tab-md',
+        baseVersion: hashMarkdownContent(prefix),
+        content: prefix
+      })
+      expect(save).toMatchObject({ ok: false, error: 'file_too_large' })
     } finally {
       detach()
     }

@@ -4,7 +4,6 @@ import {
   isMarkdownContentByteLengthOverLimit,
   MOBILE_MARKDOWN_EDIT_MAX_BYTES,
   MOBILE_MARKDOWN_READ_MAX_BYTES,
-  truncateMobileMarkdownRead,
   utf8ByteLength
 } from './mobile-markdown-document'
 
@@ -48,12 +47,8 @@ describe('mobile markdown document byte accounting', () => {
     expect(hashMarkdownContent('😀')).toMatch(/^content:4:/)
   })
 
-  it('only truncates documents already over the edit budget, so truncated is never editable', () => {
+  it('keeps the read budget above the edit budget', () => {
+    // Behavioural pin for truncated => not editable: the bridge's over-budget read test.
     expect(MOBILE_MARKDOWN_READ_MAX_BYTES).toBeGreaterThan(MOBILE_MARKDOWN_EDIT_MAX_BYTES)
-    const smallestTruncated = 'a'.repeat(MOBILE_MARKDOWN_READ_MAX_BYTES + 1)
-    expect(truncateMobileMarkdownRead(smallestTruncated).truncated).toBe(true)
-    expect(
-      isMarkdownContentByteLengthOverLimit(smallestTruncated, MOBILE_MARKDOWN_EDIT_MAX_BYTES)
-    ).toBe(true)
   })
 })
