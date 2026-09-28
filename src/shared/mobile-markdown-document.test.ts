@@ -3,6 +3,8 @@ import {
   hashMarkdownContent,
   isMarkdownContentByteLengthOverLimit,
   MOBILE_MARKDOWN_EDIT_MAX_BYTES,
+  MOBILE_MARKDOWN_READ_MAX_BYTES,
+  truncateMobileMarkdownRead,
   utf8ByteLength
 } from './mobile-markdown-document'
 
@@ -44,5 +46,14 @@ describe('mobile markdown document byte accounting', () => {
 
   it('keeps content hashes prefixed with exact byte length', () => {
     expect(hashMarkdownContent('😀')).toMatch(/^content:4:/)
+  })
+
+  it('only truncates documents already over the edit budget, so truncated is never editable', () => {
+    expect(MOBILE_MARKDOWN_READ_MAX_BYTES).toBeGreaterThan(MOBILE_MARKDOWN_EDIT_MAX_BYTES)
+    const smallestTruncated = 'a'.repeat(MOBILE_MARKDOWN_READ_MAX_BYTES + 1)
+    expect(truncateMobileMarkdownRead(smallestTruncated).truncated).toBe(true)
+    expect(
+      isMarkdownContentByteLengthOverLimit(smallestTruncated, MOBILE_MARKDOWN_EDIT_MAX_BYTES)
+    ).toBe(true)
   })
 })
