@@ -177,6 +177,7 @@ import {
   retireGeneratedWorktreeName
 } from '../worktree-name-retirement'
 import { createRetiredNameLookup } from '../../shared/worktree/retired-name-registry'
+import { retryOnGitLockContention } from '../../shared/git-lock-contention'
 
 const SSH_WORKTREE_CREATE_FETCH_FRESHNESS_MS = 30_000
 const SSH_WORKTREE_CREATE_FETCH_CACHE_MAX = 512
@@ -1672,20 +1673,44 @@ async function refreshLocalBaseRefForRemoteWorktreeCreate(
   const evaluation = await evaluateRemoteLocalBaseRefRefreshability(
     provider,
     repoPath,
-    remoteTrackingBase
+    remoteTrackingBase,
+    // Why: an already-current local ref needs no owner check or reset; skipping both avoids a spurious dirty warning and index.lock churn.
+    (behind) => behind > 0
   )
   if (!evaluation.refreshable) {
     return evaluation.result
   }
+  if (evaluation.behind <= 0) {
+    return undefined
+  }
 
   const resultBase = { baseRef: evaluation.baseRef, localBranch: evaluation.localBranch }
   try {
-    await provider.refreshLocalBaseRefForWorktreeCreate({
-      repoPath,
-      fullRef: evaluation.fullRef,
-      remoteTrackingRef: evaluation.remoteTrackingRef,
-      ...(evaluation.ownerWorktreePath ? { ownerWorktreePath: evaluation.ownerWorktreePath } : {})
-    })
+    // Why: each relay call repeats its owner/cleanliness checks, so a lock retry never resets a checkout that turned dirty.
+    await retryOnGitLockContention(() =>
+      provider
+        .refreshLocalBaseRefForWorktreeCreate({
+          repoPath,
+          fullRef: evaluation.fullRef,
+          remoteTrackingRef: evaluation.remoteTrackingRef,
+          ...(evaluation.ownerWorktreePath
+            ? { ownerWorktreePath: evaluation.ownerWorktreePath }
+            : {})
+        })
+        .catch(async (error: unknown) => {
+          // Why: a concurrent refresh may already have fast-forwarded local; that is success, not a warning.
+          if (
+            !(await isRemoteLocalRefAtRemoteTracking(
+              provider,
+              repoPath,
+              evaluation.fullRef,
+              evaluation.remoteTrackingRef
+            ))
+          ) {
+            throw error
+          }
+        })
+    )
     return {
       ...resultBase,
       status: 'updated',
@@ -1693,6 +1718,24 @@ async function refreshLocalBaseRefForRemoteWorktreeCreate(
     }
   } catch {
     return { ...resultBase, status: 'skipped_error' }
+  }
+}
+
+async function isRemoteLocalRefAtRemoteTracking(
+  provider: SshGitProvider,
+  repoPath: string,
+  fullRef: string,
+  remoteTrackingRef: string
+): Promise<boolean> {
+  try {
+    const { stdout } = await provider.exec(
+      ['rev-parse', `${fullRef}^{commit}`, `${remoteTrackingRef}^{commit}`],
+      repoPath
+    )
+    const [localOid, remoteOid] = stdout.trim().split(/\s+/)
+    return Boolean(localOid) && localOid === remoteOid
+  } catch {
+    return false
   }
 }
 
