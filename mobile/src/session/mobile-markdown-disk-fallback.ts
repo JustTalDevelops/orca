@@ -1,4 +1,5 @@
 import type { RpcFailure } from '../transport/types'
+import type { MarkdownDocState } from './mobile-session-route-types'
 
 const RENDERER_UNAVAILABLE = 'renderer_unavailable'
 
@@ -13,17 +14,15 @@ export function shouldReadMarkdownFromDiskAfterReadTabFailure(response: RpcFailu
 // truncated here, which is the branch main took for a reply that omitted it.
 export function buildMarkdownDiskFallbackDoc(args: {
   content: string
-  truncated: boolean | undefined
+  truncated?: boolean
   byteLength?: number
   tabIsDirty: boolean
-}) {
-  const readOnlyReason = args.truncated
-    ? 'File too large for mobile preview'
-    : args.tabIsDirty
-      ? 'Desktop has unsaved changes. Showing disk content.'
-      : 'Editing needs Orca desktop running.'
+}): Extract<MarkdownDocState, { status: 'ready' }> {
+  const readOnlyReason = args.tabIsDirty
+    ? 'Desktop has unsaved changes. Showing disk content.'
+    : 'Editing needs Orca desktop running.'
   return {
-    status: 'ready' as const,
+    status: 'ready',
     content: args.content,
     localContent: args.content,
     baseVersion: '',

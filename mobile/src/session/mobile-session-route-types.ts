@@ -91,7 +91,7 @@ export type MarkdownDocState =
       saving?: boolean
       saveError?: string
       readOnlyReason?: string
-      truncated?: boolean
+      truncated?: true
       byteLength?: number
     }
   | { status: 'error'; message: string }

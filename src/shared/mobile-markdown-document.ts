@@ -86,12 +86,13 @@ export function truncateMobileMarkdownRead(
 ):
   | { content: string; truncated: false }
   | { content: string; truncated: true; byteLength: number } {
-  if (!isMarkdownContentByteLengthOverLimit(content, MOBILE_MARKDOWN_READ_MAX_BYTES)) {
+  const byteLength = utf8ByteLength(content)
+  if (byteLength <= MOBILE_MARKDOWN_READ_MAX_BYTES) {
     return { content, truncated: false }
   }
   return {
     content: clampUtf8TextPrefix(content, MOBILE_MARKDOWN_READ_MAX_BYTES),
     truncated: true,
-    byteLength: utf8ByteLength(content)
+    byteLength
   }
 }
