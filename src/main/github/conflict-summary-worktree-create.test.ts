@@ -18,6 +18,7 @@ import {
   _resetWorktreeCreateRepoActivityForTests,
   holdRepoForWorktreeCreate
 } from '../git/worktree-create-repo-activity'
+import { runLocalWorktreeCreate } from '../git/worktree-create-git-executor'
 
 type GitResult = { stdout: string }
 type GitHandler = (argv: string[]) => Promise<GitResult>
@@ -61,10 +62,14 @@ const expectedSummary = {
   files: ['src/conflict.ts']
 }
 
-function deriveSummary(admissionTier: GitAdmissionTier) {
-  return getPRConflictSummary(REPO_PATH, 'main', 'github-base-oid', 'head-oid-1', {
-    admissionTier
-  })
+function deriveSummary(admissionTier?: GitAdmissionTier) {
+  return getPRConflictSummary(
+    REPO_PATH,
+    'main',
+    'github-base-oid',
+    'head-oid-1',
+    admissionTier ? { admissionTier } : {}
+  )
 }
 
 describe('getPRConflictSummary while a worktree create holds the repo', () => {
@@ -99,6 +104,15 @@ describe('getPRConflictSummary while a worktree create holds the repo', () => {
     vi.setSystemTime(START + PAST_FETCH_WINDOW)
 
     await deriveSummary('interactive')
+    expect(spawnCount('fetch')).toBe(2)
+  })
+
+  it("still fetches for the create's own lookup, which inherits the interactive tier", async () => {
+    await deriveSummary('background')
+    const repo = { path: REPO_PATH }
+    vi.setSystemTime(START + PAST_FETCH_WINDOW)
+
+    await runLocalWorktreeCreate(repo, () => deriveSummary())
     expect(spawnCount('fetch')).toBe(2)
   })
 
