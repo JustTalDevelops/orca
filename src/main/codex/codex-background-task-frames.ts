@@ -1,9 +1,5 @@
 import type { NativeChatSubagentState } from '../../shared/native-chat-types'
 import { readCodexSubagentAnnouncement } from './codex-subagent-activity'
-import {
-  codexCollabClosedThread,
-  readCodexCollabAgentToolCall
-} from './codex-collab-agent-tool-call'
 import { codexChildTurnState } from './codex-subagent-executions'
 import { readRecord } from './codex-item-field-readers'
 import { readCodexThreadItem } from './codex-structured-item-translation'
@@ -26,15 +22,14 @@ export type CodexBackgroundTaskFrame =
       state: NativeChatSubagentState
     }
   | {
-      /** A child turn that ended with no `turn/completed`. No `turnId`: the one it is running.
-       *  `threadId` is the child's, which for a `closeAgent` is not the thread that sent it. */
+      /** A child turn that ended with no `turn/completed`. No `turnId`: the one it is running. */
       kind: 'turn-ended'
       threadId: string
       turnId: string | null
       state: CodexChildTurnEnding
     }
 
-type CodexChildTurnEnding = Extract<NativeChatSubagentState, 'failed' | 'stopped' | 'unverifiable'>
+type CodexChildTurnEnding = Extract<NativeChatSubagentState, 'failed' | 'unverifiable'>
 
 export type CodexBackgroundTaskEvent = {
   method: string
@@ -89,16 +84,7 @@ export function readCodexBackgroundTaskFrame(
     return null
   }
   const item = readCodexThreadItem(readRecord(event.params).item)
-  if (!item) {
-    return null
-  }
-  const call = readCodexCollabAgentToolCall(item)
-  const closed = call && codexCollabClosedThread(call)
-  if (closed && closed !== primaryThreadId) {
-    // The caller shut the helper down: whatever turn it was running is over, stopped by its caller.
-    return { kind: 'turn-ended', threadId: closed, turnId: null, state: 'stopped' }
-  }
-  const announcement = readCodexSubagentAnnouncement(item)
+  const announcement = item && readCodexSubagentAnnouncement(item)
   if (!announcement || announcement.agentThreadId === primaryThreadId) {
     return null
   }

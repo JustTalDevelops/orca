@@ -101,7 +101,7 @@ export class CodexSubagentRoster {
     this.now = deps.now ?? (() => Date.now())
     this.executions = deps.executions ?? new CodexSubagentExecutions()
     // The row follows the executions, so every frame that ends a child's turn — its own
-    // `turn/completed`, a fatal error, its thread closing, its caller closing it — settles it.
+    // `turn/completed`, a fatal error, its thread closing — settles it.
     // A refused write clears `lastSerialized`, so the next write of the group retries it.
     this.unfollow = this.executions.onExecutionChanged(
       (child) => child.execution && this.follow(child, child.execution)

@@ -394,18 +394,37 @@ describe('Codex default-mode helpers', () => {
     expect(run.strip()).toHaveLength(1)
   })
 
-  it('ends a running helper its caller closed as cancelled, in the strip and the record together', async () => {
+  it("ends a closed helper only on its own interrupted turn, never on the caller's close item", async () => {
     const run = await session()
     run.send(
       turn('turn/started', THREAD_ID, PARENT_TURN),
       spawnCompleted,
       turn('turn/started', HELPER, HELPER_TURN),
-      closeCompleted
+      // What Codex reports for a close that failed on a running helper: the status is the
+      // helper's, not the close's, so `completed` says nothing about whether it stopped.
+      collab('item/completed', {
+        id: 'call-close-errored',
+        tool: 'closeAgent',
+        status: 'completed',
+        receiverThreadIds: [HELPER],
+        agentsStates: { [HELPER]: { status: 'running', message: null } }
+      })
     )
+    expect(run.agents()).toEqual([expect.objectContaining({ membership: 'live' })])
+    expect(run.strip()).toHaveLength(1)
+    expect(run.rosterRows().at(-1)?.agents).toEqual([
+      expect.objectContaining({ id: HELPER, state: 'working' })
+    ])
+
+    // A close that works aborts the helper's turn, which Codex reports on the helper's thread.
+    run.send(closeCompleted, turn('turn/completed', HELPER, HELPER_TURN, 'interrupted'))
     expect(run.agents()).toEqual([
       expect.objectContaining({ membership: 'settled', outcome: 'cancelled' })
     ])
     expect(run.strip()).toEqual([])
+    expect(run.rosterRows().at(-1)?.agents).toEqual([
+      expect.objectContaining({ id: HELPER, state: 'stopped' })
+    ])
     expect(run.toolRow('close_agent')).toMatchObject({
       state: 'completed',
       input: { description: LABEL }
@@ -496,17 +515,6 @@ describe('the roster row follows a helper whose turn ends with no turn/completed
       expect(lastRow(run)).toEqual([expect.objectContaining({ id: HELPER, state: rowState })])
     }
   )
-
-  it('settles the row when its caller closes the helper', async () => {
-    const run = await session()
-    run.send(
-      turn('turn/started', THREAD_ID, PARENT_TURN),
-      spawnCompleted,
-      turn('turn/started', HELPER, HELPER_TURN),
-      closeCompleted
-    )
-    expect(lastRow(run)).toEqual([expect.objectContaining({ id: HELPER, state: 'stopped' })])
-  })
 })
 
 describe('a restored thread', () => {

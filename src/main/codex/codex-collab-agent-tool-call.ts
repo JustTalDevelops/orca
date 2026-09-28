@@ -66,13 +66,6 @@ export function codexCollabSpawnedThread(call: CodexCollabAgentToolCall): string
   return call.tool === 'spawnAgent' ? (call.receiverThreadIds[0] ?? null) : null
 }
 
-/** The helper a finished `closeAgent` shut down. A failed close left it running. */
-export function codexCollabClosedThread(call: CodexCollabAgentToolCall): string | null {
-  return call.tool === 'closeAgent' && call.status === 'completed'
-    ? (call.receiverThreadIds[0] ?? null)
-    : null
-}
-
 /** A helper's row label: the head of the prompt it was spawned with, on one line. */
 export function codexCollabHelperLabel(prompt: string | null): string | null {
   const collapsed = prompt === null ? '' : collapsedToolInputPrefix(prompt)

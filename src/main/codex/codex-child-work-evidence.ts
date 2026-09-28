@@ -129,15 +129,12 @@ export class CodexChildWorkEvidence {
     event: CodexBackgroundTaskEvent,
     frame: CodexBackgroundTaskFrame | null
   ): string | null {
-    // A frame names its child, which a caller's spawn or close is not sent on.
     const threadId =
       frame?.kind === 'subagent'
         ? frame.agentThreadId
-        : frame
-          ? frame.threadId
-          : CHILD_FRAME_METHODS.has(event.method)
-            ? event.threadId
-            : null
+        : frame || CHILD_FRAME_METHODS.has(event.method)
+          ? event.threadId
+          : null
     return threadId === this.primaryThreadId ? null : threadId
   }
 
