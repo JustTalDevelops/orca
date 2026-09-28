@@ -109,14 +109,17 @@ export const sessionWorktreeRecordSchema = z
  * `content`, `version` and `isDirty` are required: use-mobile-session-document-readers.ts:38-45
  * publishes all three into the tab's ready state with no guard, so a reply missing one rendered
  * `undefined` in the editor and saved against an undefined base version.
- * `editable` and `readOnlyReason` are guarded on the same lines and stay optional.
+ * `editable` and `readOnlyReason` are guarded on the same lines and stay optional, as are
+ * `truncated` and `byteLength`, which only a host that truncates oversize documents sends.
  */
 export const markdownTabDocumentSchema = z.looseObject({
   content: z.string(),
   version: z.string(),
   isDirty: z.boolean(),
   editable: salvagedOptional('editable', z.boolean()),
-  readOnlyReason: salvagedOptional('readOnlyReason', z.string())
+  readOnlyReason: salvagedOptional('readOnlyReason', z.string()),
+  truncated: salvagedOptional('truncated', z.boolean()),
+  byteLength: salvagedOptional('byteLength', z.number())
 })
 
 /**

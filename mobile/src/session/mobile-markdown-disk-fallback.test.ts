@@ -80,12 +80,15 @@ describe('buildMarkdownDiskFallbackDoc', () => {
       buildMarkdownDiskFallbackDoc({
         content: '# Partial',
         truncated: true,
+        byteLength: 700_000,
         tabIsDirty: true
       })
     ).toMatchObject({
       editable: false,
       stale: true,
-      readOnlyReason: 'File too large for mobile preview'
+      readOnlyReason: 'File too large for mobile preview',
+      truncated: true,
+      byteLength: 700_000
     })
   })
 })

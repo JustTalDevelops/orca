@@ -14,6 +14,7 @@ export function shouldReadMarkdownFromDiskAfterReadTabFailure(response: RpcFailu
 export function buildMarkdownDiskFallbackDoc(args: {
   content: string
   truncated: boolean | undefined
+  byteLength?: number
   tabIsDirty: boolean
 }) {
   const readOnlyReason = args.truncated
@@ -29,6 +30,7 @@ export function buildMarkdownDiskFallbackDoc(args: {
     isDirty: false,
     editable: false,
     stale: args.tabIsDirty,
-    readOnlyReason
+    readOnlyReason,
+    ...(args.truncated ? { truncated: true, byteLength: args.byteLength } : {})
   }
 }
