@@ -453,6 +453,60 @@ describe.each(['opencode', 'opencode2'] as const)('%s plugin on OpenCode 2', (ag
     await cleanup?.()
   })
 
+  // A plugin reloaded mid-turn joins after execution.started; event orders captured from OpenCode 2.0.14.
+  it('re-derives Working from the next step after a mid-turn reload lost a pending question', async () => {
+    const { names, cleanup } = await runSetupBridge([
+      {
+        type: 'form.replied',
+        data: { id: 'form-q', sessionID: 'ses_root', answer: { q0: 'Yes' } }
+      },
+      { type: 'session.tool.success', data: { sessionID: 'ses_root', id: 'tool-0' } },
+      { type: 'session.step.ended', data: { sessionID: 'ses_root', finish: 'tool-calls' } },
+      { type: 'session.step.started', data: { sessionID: 'ses_root' } },
+      { type: 'session.tool.called', data: { sessionID: 'ses_root', id: 'tool-1' } }
+    ])
+    await vi.waitFor(() => {
+      expect(names).toEqual(['SessionBusy'])
+    })
+    await cleanup?.()
+  })
+
+  it('keeps the pane Working after answering a question raised after a mid-turn reload', async () => {
+    const { names, cleanup } = await runSetupBridge([
+      { type: 'session.tool.success', data: { sessionID: 'ses_root', id: 'tool-0' } },
+      { type: 'session.step.ended', data: { sessionID: 'ses_root', finish: 'tool-calls' } },
+      { type: 'session.step.started', data: { sessionID: 'ses_root' } },
+      { type: 'session.tool.called', data: { sessionID: 'ses_root', id: 'tool-1' } },
+      { type: 'form.created', data: { form: questionForm('form-q') } },
+      {
+        type: 'form.replied',
+        data: { id: 'form-q', sessionID: 'ses_root', answer: { q0: 'Yes' } }
+      },
+      { type: 'session.tool.success', data: { sessionID: 'ses_root', id: 'tool-1' } }
+    ])
+    await vi.waitFor(() => {
+      expect(names).toEqual(['SessionBusy', 'AskUserQuestion', 'SessionBusy'])
+    })
+    await cleanup?.()
+  })
+
+  it('keeps a question blocking while a parallel tool in the same step reports progress', async () => {
+    const { names, cleanup } = await runSetupBridge([
+      { type: 'session.execution.started', data: { sessionID: 'ses_root' } },
+      { type: 'session.step.started', data: { sessionID: 'ses_root' } },
+      { type: 'session.tool.called', data: { sessionID: 'ses_root', id: 'tool-shell' } },
+      { type: 'session.tool.called', data: { sessionID: 'ses_root', id: 'tool-0' } },
+      { type: 'form.created', data: { form: questionForm('form-q') } },
+      { type: 'session.tool.progress', data: { sessionID: 'ses_root', id: 'tool-shell' } },
+      { type: 'session.tool.success', data: { sessionID: 'ses_root', id: 'tool-shell' } }
+    ])
+    await vi.waitFor(() => {
+      expect(names).toContain('AskUserQuestion')
+    })
+    expect(names.at(-1)).toBe('AskUserQuestion')
+    await cleanup?.()
+  })
+
   it('keeps a live question blocker while an ignored form is raised and resolved', async () => {
     const { names, cleanup } = await runSetupBridge([
       { type: 'session.execution.started', data: { sessionID: 'ses_root' } },
