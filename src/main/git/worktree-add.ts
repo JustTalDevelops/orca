@@ -12,6 +12,7 @@ import {
   getLocalBaseRefUpdateSuggestionForWorktreeCreate,
   refreshLocalBaseRefForWorktreeCreate
 } from './worktree-base-refresh'
+import { parseRemoteTrackingLocalBaseRef } from './worktree-base-refresh-analysis'
 import { resolveWorktreeBaseCommitOid } from './worktree-base-ref-probe'
 import type {
   AddWorktreeOptions,
@@ -32,26 +33,32 @@ export async function resolveWorktreeAddBaseContext(
   repoPath: string,
   baseBranch: string,
   refreshLocalBaseRef: boolean,
-  options: AddWorktreeOptions
+  options: AddWorktreeOptions,
+  createdBranch: string
 ): Promise<WorktreeAddBaseContext> {
   let effectiveBaseOid: string | null = null
   const effectiveBase = await resolveWorktreeAddBaseRef(baseBranch, async (qualifiedRef) => {
     effectiveBaseOid = await resolveWorktreeBaseCommitOid(repoPath, qualifiedRef, options)
     return effectiveBaseOid !== null
   })
-  const pendingLocalBaseRefRefresh = refreshLocalBaseRef
-    ? refreshLocalBaseRefForWorktreeCreate(
-        repoPath,
-        baseBranch,
-        effectiveBase,
-        options.remoteTrackingBase,
-        options
-      ).catch((error: unknown) => {
-        // Why: the create may already have succeeded by the time this settles; a refresh bug must not fail it.
-        console.warn('addWorktree: local base ref refresh failed unexpectedly', error)
-        return undefined
-      })
-    : undefined
+  // Why: `-b` refuses an existing branch, so creating the base's own local branch leaves nothing to refresh; probing it would race the overlapped add's branch write into a false "not fast-forward" warning.
+  const createsLocalBaseBranch =
+    parseRemoteTrackingLocalBaseRef(baseBranch, effectiveBase, options.remoteTrackingBase)
+      ?.localBranch === createdBranch
+  const pendingLocalBaseRefRefresh =
+    refreshLocalBaseRef && !createsLocalBaseBranch
+      ? refreshLocalBaseRefForWorktreeCreate(
+          repoPath,
+          baseBranch,
+          effectiveBase,
+          options.remoteTrackingBase,
+          options
+        ).catch((error: unknown) => {
+          // Why: the create may already have succeeded by the time this settles; a refresh bug must not fail it.
+          console.warn('addWorktree: local base ref refresh failed unexpectedly', error)
+          return undefined
+        })
+      : undefined
   const localBaseRefUpdateSuggestion =
     !refreshLocalBaseRef && options.suggestLocalBaseRefUpdate
       ? await getLocalBaseRefUpdateSuggestionForWorktreeCreate(
@@ -209,7 +216,8 @@ async function performAddWorktree(
         repoPath,
         baseBranch,
         refreshLocalBaseRef,
-        options
+        options,
+        branch
       )
       effectiveBase = baseContext.effectiveBase
       pendingLocalBaseRefRefresh = baseContext.pendingLocalBaseRefRefresh

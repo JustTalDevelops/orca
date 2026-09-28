@@ -26,7 +26,7 @@ type LocalBaseRefRefreshability =
       result: LocalBaseRefRefreshResult
     }
 
-function parseRemoteTrackingLocalBaseRef(
+export function parseRemoteTrackingLocalBaseRef(
   baseBranch: string,
   remoteTrackingRef: string,
   remoteTrackingBase?: AddWorktreeOptions['remoteTrackingBase']

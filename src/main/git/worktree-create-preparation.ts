@@ -190,7 +190,8 @@ export async function finalizePreparedWorktree(
             repoPath,
             baseBranch,
             refreshLocalBaseRef,
-            finalizeGitOptions
+            finalizeGitOptions,
+            branch
           )
           const targetHead =
             baseContext.effectiveBaseOid ??

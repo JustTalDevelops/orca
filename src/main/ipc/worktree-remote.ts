@@ -2126,8 +2126,12 @@ export async function createRemoteWorktree(
   }
 
   // Why: started, not awaited — the relay adds from the remote-tracking ref, so the refresh overlaps the checkout.
+  // A create of the base's own local branch is skipped: `-b` proves it did not exist, and probing it would race the add.
   const pendingLocalBaseRefRefresh =
-    settings.refreshLocalBaseRefOnWorktreeCreate && !checkoutExistingBranch && remoteTrackingBase
+    settings.refreshLocalBaseRefOnWorktreeCreate &&
+    !checkoutExistingBranch &&
+    remoteTrackingBase &&
+    remoteTrackingBase.branch !== branchName
       ? refreshLocalBaseRefForRemoteWorktreeCreate(provider, repo, remoteTrackingBase).catch(
           (error: unknown) => {
             console.warn('[worktree-create] local base ref refresh failed unexpectedly', error)

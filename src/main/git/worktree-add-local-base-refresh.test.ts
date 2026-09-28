@@ -431,7 +431,8 @@ describe('addWorktree', () => {
     ])
   })
 
-  // #15331: evaluation runs before `-b <branch>` exists, so rev-list fails on the missing local ref.
+  // #15331: `-b feature-x` proves there was no local feature-x to refresh. The add overlaps the
+  // refresh, so a probe could see the branch absent and then present (the add just wrote it).
   it('does not warn when worktree add itself creates the local base branch', async () => {
     refreshGitMock
       .mockResolvedValueOnce({ stdout: 'abc123\n' }) // rev-parse --verify --quiet refs/remotes/origin/feature-x^{commit}
@@ -439,8 +440,8 @@ describe('addWorktree', () => {
         new Error(
           "fatal: ambiguous argument 'refs/heads/feature-x...refs/remotes/origin/feature-x': unknown revision or path not in the working tree."
         )
-      ) // rev-list: refs/heads/feature-x does not exist yet
-      .mockRejectedValueOnce(Object.assign(new Error('missing ref'), { code: 1 })) // show-ref refs/heads/feature-x (missing)
+      ) // rev-list, if it ran: refs/heads/feature-x not written yet
+      .mockResolvedValueOnce({ stdout: '' }) // show-ref, if it ran: the concurrent add has written it
 
     const result = await addWorktree(
       '/repo',
@@ -460,7 +461,8 @@ describe('addWorktree', () => {
       '/repo-feature-x',
       'refs/remotes/origin/feature-x'
     ])
-    // Nothing was refreshed, so no ref mutation.
+    // No refresh probe raced the add, and nothing was mutated.
+    expect(refreshGitMock.mock.calls.map((call) => call[0][0])).toEqual(['rev-parse'])
     expect(gitExecFileAsyncMock.mock.calls.map((call) => call[0][0])).not.toContain('update-ref')
     expect(gitExecFileAsyncMock.mock.calls.map((call) => call[0][0])).not.toContain('reset')
   })
@@ -505,9 +507,9 @@ describe('addWorktree', () => {
       .mockResolvedValueOnce({ stdout: 'abc123\n' }) // rev-parse --verify --quiet refs/remotes/origin/main^{commit}
       .mockResolvedValueOnce({ stdout: '2\t3\n' }) // rev-list: 2 local-only commits
 
-    const result = await addWorktree('/repo', '/repo-feature', 'main', 'origin/main', true)
+    const result = await addWorktree('/repo', '/repo-feature', 'my-feature', 'origin/main', true)
 
-    // Same branch name as the base, but rev-list succeeded: real divergence must still warn.
+    // Local main exists with local-only commits: real divergence must still warn.
     expect(result.localBaseRefRefresh).toEqual({
       status: 'skipped_not_fast_forward',
       baseRef: 'origin/main',
