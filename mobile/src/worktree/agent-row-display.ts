@@ -1,8 +1,7 @@
 import type { RuntimeWorktreeAgentRow } from '../../../src/shared/runtime-types'
-import { isAgentStatusState } from '../../../src/shared/agent-status-types'
 import { AGENT_STATUS_STALE_AFTER_MS } from '../../../src/shared/agent-status-freshness'
 import {
-  resolveAgentPaneDisplayState,
+  resolveWireAgentPaneDisplayState,
   type AgentStatusDisplayState
 } from '../../../src/shared/agent-status-display-state'
 
@@ -17,15 +16,12 @@ type AgentDotRow = Pick<
 >
 
 export function agentDotState(row: AgentDotRow, now: number): AgentDotState {
-  // Why: rows arrive unparsed, so a state arm from a newer host degrades to idle.
-  if (!isAgentStatusState(row.state)) {
-    return 'idle'
-  }
   // Why: an agent that exits without a final report would otherwise read as
   // active forever. Decay stale live evidence to idle, matching desktop's
   // renderer-side staleness decay (worktree-agent-rows.ts).
   const stale = row.state !== 'done' && now - row.updatedAt > AGENT_STATUS_STALE_AFTER_MS
-  const state = resolveAgentPaneDisplayState(row, stale ? 'idle' : undefined)
+  // Why: rows arrive unparsed, so a state arm from a newer host degrades to idle.
+  const state = resolveWireAgentPaneDisplayState(row, stale ? 'idle' : undefined) ?? 'idle'
   return state === 'unverifiable' ? 'idle' : state
 }
 

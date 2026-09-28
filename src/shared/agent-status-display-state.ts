@@ -1,5 +1,9 @@
 import type { AgentMainAgentStatus } from './main-agent-status'
-import type { AgentStatusState, AgentWorkingMode } from './agent-status-types'
+import {
+  isAgentStatusState,
+  type AgentStatusState,
+  type AgentWorkingMode
+} from './agent-status-types'
 import type { AgentJournalTurnOutcome } from './agent-turn-outcome'
 
 /** How a main agent's turn ended when it did not end cleanly. `failure` is the provider's own
@@ -111,6 +115,35 @@ export function resolveAgentPaneDisplayState(
     return childWork
   }
   return ending === 'cancellation' ? 'interrupted' : 'done'
+}
+
+type WireAgentStatusDisplayRow = {
+  state: string
+  workingMode?: AgentWorkingMode
+  interrupted?: boolean
+  mainAgent?: AgentMainAgentStatus
+}
+
+/** What Orca shows for a row another build published, unparsed. A state arm this build does not
+ *  know degrades to absent: a `mainAgent` falls back to the row's own state, a row shows nothing. */
+export function resolveWireAgentPaneDisplayState(
+  row: WireAgentStatusDisplayRow,
+  decayedTo?: 'idle' | 'unverifiable'
+): AgentStatusDisplayState | undefined {
+  if (!isAgentStatusState(row.state)) {
+    return undefined
+  }
+  const mainAgent =
+    row.mainAgent && isAgentStatusState(row.mainAgent.state) ? row.mainAgent : undefined
+  return resolveAgentPaneDisplayState(
+    {
+      state: row.state,
+      workingMode: row.workingMode,
+      interrupted: row.interrupted,
+      ...(mainAgent ? { mainAgent } : {})
+    },
+    decayedTo
+  )
 }
 
 export const AGENT_STATUS_DISPLAY_PRIORITY: readonly AgentStatusDisplayState[] = [

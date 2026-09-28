@@ -96,6 +96,15 @@ describe('agentDotState', () => {
       )
     ).toBe('done')
   })
+
+  it("falls back to the row's own state when a newer host sends an unknown main-agent state", () => {
+    // Why: parsed like the wire, so the unknown arm needs no cast.
+    const newerArm = JSON.parse('{"state":"unknown-state","stateStartedAt":0}')
+    expect(agentDotState(row({ state: 'working', mainAgent: newerArm }), 0)).toBe('working')
+    expect(agentDotState(row({ state: 'done', interrupted: true, mainAgent: newerArm }), 0)).toBe(
+      'interrupted'
+    )
+  })
 })
 
 describe('agentDisplayLabel', () => {

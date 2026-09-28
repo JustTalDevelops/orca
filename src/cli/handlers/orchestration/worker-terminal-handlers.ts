@@ -1,5 +1,5 @@
 import type { AgentMainAgentStatus } from '../../../shared/agent-status-types'
-import { wireAgentDisplayState } from '../../agent-display-state'
+import { resolveWireAgentPaneDisplayState } from '../../../shared/agent-status-display-state'
 import type { CommandHandler } from '../../dispatch'
 import { printResult } from '../../format'
 import {
@@ -161,7 +161,7 @@ export const ORCHESTRATION_WORKER_TERMINAL_HANDLERS: Record<string, CommandHandl
                   : 'unknown'
                 const workspace = projection?.workspace?.id ?? 'unknown'
                 const stage = projection
-                  ? (wireAgentDisplayState({
+                  ? (resolveWireAgentPaneDisplayState({
                       state: projection.stage.activity,
                       mainAgent: projection.stage.mainAgent
                     }) ?? projection.stage.activity)
