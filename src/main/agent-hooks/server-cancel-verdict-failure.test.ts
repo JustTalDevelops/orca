@@ -100,9 +100,6 @@ function pressCtrlC(server: AgentHookServer, agentType: string): boolean {
     baselineStateStartedAt: baseline.stateStartedAt,
     baselinePrompt: baseline.prompt,
     baselineAgentType: agentType,
-    ...(baseline.mainAgent
-      ? { baselineMainAgentStateStartedAt: baseline.mainAgent.stateStartedAt }
-      : {}),
     intent: 'ctrl-c'
   })
 }
