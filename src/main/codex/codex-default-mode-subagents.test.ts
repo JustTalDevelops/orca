@@ -1,6 +1,7 @@
-// Codex's default multi-agent mode announces a helper only by the `collabAgentToolCall` that
-// spawned it. These frames, through the real adapter, must register that helper the same way a
-// `subAgentActivity` does: one child in the strip, the host's records and the roster row.
+// Codex's default multi-agent mode announces a helper only by the `collabAgentToolCall` items that
+// spawn, message, wait on or close it. These frames, through the real adapter, must register that
+// helper the same way a `subAgentActivity` does: one child in the strip, the host's records and
+// the roster row.
 
 import { describe, expect, it } from 'vitest'
 import type { AgentJournalItemBody } from '../../shared/agent-session-journal-types'
@@ -15,6 +16,8 @@ import { CodexStructuredSessionAdapter } from './codex-structured-session-adapte
 import { CodexBackgroundTaskTracker } from './codex-background-task-tracker'
 import { createCodexJournalTranslator } from './codex-structured-journal-translation'
 import { CodexSubagentExecutions } from './codex-subagent-executions'
+import { readCodexSubagentAnnouncements } from './codex-subagent-activity'
+import type { CodexThreadItem } from './codex-thread-item-identity'
 
 const parent = makeStructuredAgentStatusSubject(
   {
@@ -483,6 +486,112 @@ describe('Codex default-mode helpers', () => {
   })
 })
 
+describe('a helper whose spawn was never seen', () => {
+  const sendInput = collab('item/completed', {
+    id: 'call-send-input',
+    tool: 'sendInput',
+    status: 'completed',
+    receiverThreadIds: [HELPER],
+    prompt: 'Now run it again.',
+    agentsStates: { [HELPER]: { status: 'running', message: null } }
+  })
+
+  it("registers from any call that names it, so its shell is no longer the session's own", async () => {
+    const run = await session()
+    run.send(
+      turn('turn/started', THREAD_ID, PARENT_TURN),
+      turn('turn/started', HELPER, HELPER_TURN),
+      helperShell('item/started')
+    )
+    expect(run.strip()).toEqual([expect.objectContaining({ kind: 'command' })])
+
+    run.send(sendInput)
+    // No spawn named it, so it reads as any unnamed subagent does.
+    expect(run.strip()).toEqual([{ id: `codex-agent:${HELPER}`, kind: 'agent' }])
+    expect(run.agents()).toEqual([
+      expect.objectContaining({ membership: 'live', state: 'working' })
+    ])
+    expect(run.commands()).toEqual([
+      expect.objectContaining({
+        membership: 'live',
+        parentChildWorkId: run.agents()[0]?.childWorkId
+      })
+    ])
+    expect(run.rosterRows().at(-1)?.agents).toEqual([
+      expect.objectContaining({ id: HELPER, label: 'subagent', state: 'working' })
+    ])
+    expect(run.toolRow('send_input')).toMatchObject({ input: { description: HELPER } })
+  })
+
+  it('registers each helper a call on several names', async () => {
+    const second = 'helper-two'
+    const run = await session()
+    run.send(
+      turn('turn/started', THREAD_ID, PARENT_TURN),
+      turn('turn/started', HELPER, HELPER_TURN),
+      turn('turn/started', second, 'helper-two-turn'),
+      collab('item/started', {
+        id: 'call-wait-both',
+        tool: 'wait',
+        status: 'inProgress',
+        receiverThreadIds: [HELPER, second]
+      })
+    )
+    expect(run.strip()).toEqual([
+      { id: `codex-agent:${HELPER}`, kind: 'agent' },
+      { id: `codex-agent:${second}`, kind: 'agent' }
+    ])
+    expect(run.agents()).toEqual([
+      expect.objectContaining({ membership: 'live' }),
+      expect.objectContaining({ membership: 'live' })
+    ])
+    expect(run.rosterRows().at(-1)?.agents).toEqual([
+      expect.objectContaining({ id: HELPER, label: 'subagent' }),
+      expect.objectContaining({ id: second, label: 'subagent 2' })
+    ])
+  })
+
+  it("puts a helper's run in the turn that sent it work, even after that turn ended", async () => {
+    const run = await session()
+    run.send(
+      turn('turn/started', THREAD_ID, PARENT_TURN),
+      spawnCompleted,
+      turn('turn/started', HELPER, HELPER_TURN),
+      turn('turn/completed', HELPER, HELPER_TURN),
+      turn('turn/completed', THREAD_ID, PARENT_TURN),
+      turn('turn/started', THREAD_ID, 'parent-turn-2'),
+      { ...sendInput, params: { ...sendInput.params, turnId: 'parent-turn-2' } },
+      turn('turn/completed', THREAD_ID, 'parent-turn-2'),
+      turn('turn/started', HELPER, 'helper-turn-2')
+    )
+    const groups = new Set(run.rosterRows().map((row) => row.groupId))
+    expect(groups.size).toBe(2)
+    expect(run.rosterRows().at(-1)?.agents).toEqual([
+      expect.objectContaining({ id: HELPER, state: 'working' })
+    ])
+  })
+
+  it('registers every helper a call names, and none it reports not found', () => {
+    const [second, missing] = ['helper-two', 'helper-missing']
+    const waited: CodexThreadItem = {
+      type: 'collabAgentToolCall',
+      id: 'call-wait-many',
+      tool: 'wait',
+      status: 'completed',
+      receiverThreadIds: [HELPER, second, missing],
+      agentsStates: {
+        [HELPER]: { status: 'completed', message: 'done' },
+        [second]: { status: 'running', message: null },
+        [missing]: { status: 'notFound', message: null }
+      }
+    }
+    expect(readCodexSubagentAnnouncements(waited, THREAD_ID)).toEqual([
+      { agentThreadId: HELPER, label: null, namesParentTurn: false, spawned: false },
+      { agentThreadId: second, label: null, namesParentTurn: false, spawned: false }
+    ])
+  })
+})
+
 describe('the roster row follows a helper whose turn ends with no turn/completed', () => {
   const lastRow = (run: Awaited<ReturnType<typeof session>>) => run.rosterRows().at(-1)?.agents
   const fatal: Frame = {
@@ -518,7 +627,7 @@ describe('the roster row follows a helper whose turn ends with no turn/completed
 })
 
 describe('a restored thread', () => {
-  function restored() {
+  function restored(replayed = [spawnCompleted, waitCompleted]) {
     const executions = new CodexSubagentExecutions()
     const rows = new Map<string, AgentJournalItemBody>()
     const translator = createCodexJournalTranslator({
@@ -535,9 +644,8 @@ describe('a restored thread', () => {
       }
     })
     const tracker = new CodexBackgroundTaskTracker(THREAD_ID, executions)
-    const replayed = [spawnCompleted, waitCompleted].map((frame) => frame.params.item)
     const admission = translator.restoreThread(THREAD_ID, {
-      turns: [{ id: PARENT_TURN, items: replayed }]
+      turns: [{ id: PARENT_TURN, items: replayed.map((frame) => frame.params.item) }]
     })
     expect(admission).toEqual({ accepted: true })
     const bodies = () => [...rows.values()]
@@ -572,5 +680,11 @@ describe('a restored thread', () => {
           body.kind === 'message' && body.blocks.some((block) => block.type === 'subagent-group')
       )
     ).toEqual([])
+  })
+
+  it('knows a helper whose spawn history compacted away, from a call on it', () => {
+    const { tracker } = restored([waitCompleted])
+    tracker.observe({ ...turn('turn/started', HELPER, HELPER_TURN), threadId: HELPER })
+    expect(tracker.state?.tasks).toEqual([{ id: `codex-agent:${HELPER}`, kind: 'agent' }])
   })
 })

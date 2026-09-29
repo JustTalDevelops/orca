@@ -1,19 +1,24 @@
 import type { NativeChatSubagentState } from '../../shared/native-chat-types'
-import { readCodexSubagentAnnouncement } from './codex-subagent-activity'
+import { readCodexSubagentAnnouncements } from './codex-subagent-activity'
 import { codexChildTurnState } from './codex-subagent-executions'
 import { readRecord } from './codex-item-field-readers'
 import { readCodexThreadItem } from './codex-structured-item-translation'
 import { readCodexProviderVerdict } from './codex-structured-journal-provider-verdicts'
 import { readCodexTurnId } from './codex-structured-thread-facts'
 
+export type CodexAnnouncedChild = {
+  agentThreadId: string
+  label: string | null
+  parentTurnId: string | null | undefined
+  /** The reporting thread, for a spawn: the agent that spawned the child. */
+  spawnerThreadId: string | undefined
+}
+
 export type CodexBackgroundTaskFrame =
   | {
-      kind: 'subagent'
-      agentThreadId: string
-      label: string | null
-      parentTurnId: string | null | undefined
-      /** The reporting thread, for a spawn: the agent that spawned the child. */
-      spawnerThreadId: string | undefined
+      /** An item naming children, several for a call on more than one helper. */
+      kind: 'subagents'
+      children: CodexAnnouncedChild[]
     }
   | {
       kind: 'turn'
@@ -84,16 +89,14 @@ export function readCodexBackgroundTaskFrame(
     return null
   }
   const item = readCodexThreadItem(readRecord(event.params).item)
-  const announcement = item && readCodexSubagentAnnouncement(item)
-  if (!announcement || announcement.agentThreadId === primaryThreadId) {
-    return null
-  }
-  return {
-    kind: 'subagent',
-    agentThreadId: announcement.agentThreadId,
-    label: announcement.label,
-    parentTurnId: announcement.namesParentTurn ? readCodexTurnId(event.params) : undefined,
-    // Only a spawn names the spawner: other announcements ride whichever agent acted.
-    spawnerThreadId: announcement.spawned ? event.threadId : undefined
-  }
+  const children = (item ? readCodexSubagentAnnouncements(item, primaryThreadId) : []).map(
+    (announcement) => ({
+      agentThreadId: announcement.agentThreadId,
+      label: announcement.label,
+      parentTurnId: announcement.namesParentTurn ? readCodexTurnId(event.params) : undefined,
+      // Only a spawn names the spawner: other announcements ride whichever agent acted.
+      spawnerThreadId: announcement.spawned ? event.threadId : undefined
+    })
+  )
+  return children.length > 0 ? { kind: 'subagents', children } : null
 }

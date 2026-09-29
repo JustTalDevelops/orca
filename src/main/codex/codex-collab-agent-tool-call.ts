@@ -5,13 +5,16 @@
 // Shapes are from the app-server's generated schema (0.155) and a live default-mode session:
 //   * `spawnAgent` starts with `receiverThreadIds: []`. The helper's thread id first appears when
 //     the call ends, beside the `prompt` it was given — even when the call ends `failed`.
+//   * Every other call names its helpers from its start. A finished call reports a thread id it
+//     does not know as `notFound`; any other state says the helper exists.
 //   * Codex core also knows each receiver's nickname and role, but the app-server item does not
-//     carry them yet; `readCodexSubagentAnnouncement` is where they would be adopted.
+//     carry them yet; `readCodexSubagentAnnouncements` is where they would be adopted.
 //   * The item names no nickname or task path, so the prompt is the only text that tells one
 //     helper from another.
 //   * `agentsStates` is the caller's last-known snapshot of each receiver. The helper's own turn
-//     frames own its execution, so nothing here reads it as state; its `message` is what the
-//     helper said back, which the call's row shows as output.
+//     frames own its execution, so nothing here reads it as execution state: only `notFound`,
+//     which says the receiver is no helper, and `message`, what the helper said back, which the
+//     call's row shows as output.
 
 import { collapsedToolInputPrefix } from '../../shared/native-chat-tool-preview-prefix'
 import { readRecord, readString } from './codex-item-field-readers'
@@ -29,6 +32,8 @@ export type CodexCollabAgentToolCall = {
   /** `inProgress`, `completed`, `failed` or `interrupted`. */
   status: string | null
   receiverThreadIds: string[]
+  /** The receivers that are helpers: every one but those the call reports `notFound`. */
+  helperThreadIds: string[]
   prompt: string | null
   /** What each receiver said back, in `receiverThreadIds` order. */
   replies: { threadId: string; message: string }[]
@@ -54,16 +59,12 @@ export function readCodexCollabAgentToolCall(
     tool,
     status: readString(item, 'status'),
     receiverThreadIds,
+    helperThreadIds: receiverThreadIds.filter(
+      (threadId) => readString(readRecord(states[threadId]), 'status') !== 'notFound'
+    ),
     prompt: readString(item, 'prompt'),
     replies
   }
-}
-
-/** The helper a `spawnAgent` created, whatever the call's status: Codex reports `failed` for a
- *  helper that errored at birth, yet names the thread it created, and that thread can still run.
- *  A spawn in progress, or one that created nothing, names no receiver. */
-export function codexCollabSpawnedThread(call: CodexCollabAgentToolCall): string | null {
-  return call.tool === 'spawnAgent' ? (call.receiverThreadIds[0] ?? null) : null
 }
 
 /** A helper's row label: the head of the prompt it was spawned with, on one line. */

@@ -7,15 +7,15 @@
 //     segment is a semantic task name and the only label available. There is no
 //     `thread/started` for a child, so nickname/role/depth do not exist.
 //   * Codex's DEFAULT multi-agent mode sends no `subAgentActivity` at all; a
-//     helper appears only as the `collabAgentToolCall` that spawned it (read in
-//     `codex-collab-agent-tool-call.ts`). Either item announces the same child,
-//     keyed by its thread id, and child turn events own its execution state.
+//     helper appears only in the `collabAgentToolCall` items that spawn, message,
+//     wait on or close it (read in `codex-collab-agent-tool-call.ts`). Either item
+//     announces the same child, keyed by its thread id, and child turn events own
+//     its execution state.
 //   * `thread/tokenUsage/updated` reports a per-thread RUNNING TOTAL, so the
 //     latest frame replaces the previous one — it is never accumulated.
 
 import {
   codexCollabHelperLabel,
-  codexCollabSpawnedThread,
   readCodexCollabAgentToolCall
 } from './codex-collab-agent-tool-call'
 import type { CodexThreadItem } from './codex-thread-item-identity'
@@ -102,32 +102,54 @@ export type CodexSubagentAnnouncement = {
   spawned: boolean
 }
 
-/** The child a `subAgentActivity` item (the tree root excluded) or an ended `spawnAgent` call
- *  announces. Both name the child by its thread id, so a session sending both announces one. */
-export function readCodexSubagentAnnouncement(
-  item: CodexThreadItem
-): CodexSubagentAnnouncement | null {
+/** Collab calls that hand a helper work from the caller's turn, as an `interacted` activity does. */
+const CODEX_COLLAB_TOOLS_THAT_TASK_A_HELPER: ReadonlySet<string> = new Set([
+  'spawnAgent',
+  'sendInput'
+])
+
+/** The children an item announces: a `subAgentActivity`'s, or every helper a collab call names,
+ *  keyed by thread id so repeats announce one child. Neither the tree root nor the session's own
+ *  thread is a child. Any call counts, since a helper whose spawn was never seen (compacted out of
+ *  history) is known only from the calls on it. A spawn counts whatever its status: Codex reports
+ *  `failed` for a helper that errored at birth, yet names the thread it created, and that thread
+ *  can still run. */
+export function readCodexSubagentAnnouncements(
+  item: CodexThreadItem,
+  primaryThreadId: string | null
+): CodexSubagentAnnouncement[] {
+  return readAnnouncements(item).filter(({ agentThreadId }) => agentThreadId !== primaryThreadId)
+}
+
+function readAnnouncements(item: CodexThreadItem): CodexSubagentAnnouncement[] {
   const activity = readCodexSubagentActivity(item)
   if (activity) {
     return isCodexRootAgentActivity(activity)
-      ? null
-      : {
-          agentThreadId: activity.agentThreadId,
-          label: codexSubagentLabel(activity),
-          namesParentTurn: activity.kind === 'started' || activity.kind === 'interacted',
-          spawned: activity.kind === 'started'
-        }
+      ? []
+      : [
+          {
+            agentThreadId: activity.agentThreadId,
+            label: codexSubagentLabel(activity),
+            namesParentTurn: activity.kind === 'started' || activity.kind === 'interacted',
+            spawned: activity.kind === 'started'
+          }
+        ]
   }
   const call = readCodexCollabAgentToolCall(item)
-  const spawned = call && codexCollabSpawnedThread(call)
-  return call && spawned
-    ? {
-        agentThreadId: spawned,
-        label: codexCollabHelperLabel(call.prompt),
-        namesParentTurn: true,
-        spawned: true
-      }
-    : null
+  if (!call) {
+    return []
+  }
+  const spawned = call.tool === 'spawnAgent'
+  // Only a spawn's prompt describes its helper; another call's prompt is a later message to it,
+  // so a helper no spawn named reads as any unnamed subagent does.
+  const label = spawned ? codexCollabHelperLabel(call.prompt) : null
+  const namesParentTurn = CODEX_COLLAB_TOOLS_THAT_TASK_A_HELPER.has(call.tool)
+  return call.helperThreadIds.map((agentThreadId) => ({
+    agentThreadId,
+    label,
+    namesParentTurn,
+    spawned
+  }))
 }
 
 export type CodexThreadTokenTotal = { threadId: string; totalTokens: number }

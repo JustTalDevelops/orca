@@ -20,12 +20,11 @@ import { readString } from './codex-item-field-readers'
 import { codexItemRunState } from './codex-item-run-state'
 import type { CodexThreadItem } from './codex-thread-item-identity'
 
-/** The roster's name for a helper thread, or null for one it never registered. */
+/** The roster's name for a helper thread, or null for one it holds no name for. */
 export type CodexHelperName = (threadId: string) => string | null
 
 /** Who the call acted on. A spawn names its helper by its prompt until the roster holds the
- *  thread it became; a helper the roster never registered (a restored thread) is named by its
- *  thread id. */
+ *  thread it became; a helper with no name (its spawn was never seen) is named by its thread id. */
 function helperNames(call: CodexCollabAgentToolCall, helperName?: CodexHelperName): string {
   if (call.tool === 'spawnAgent') {
     const spawned = call.receiverThreadIds[0]

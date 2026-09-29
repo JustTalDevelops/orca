@@ -4,7 +4,7 @@ import type { CodexJournalCompactions } from './codex-structured-journal-compact
 import type { CodexJournalItems } from './codex-structured-journal-items'
 import {
   readCodexNotificationThreadItem,
-  readCodexSubagentAnnouncement
+  readCodexSubagentAnnouncements
 } from './codex-subagent-activity'
 import type { CodexSubagentExecutions } from './codex-subagent-executions'
 import {
@@ -34,8 +34,8 @@ export function restoreCodexHistoryItem(
   }
 ): CodexJournalTranslationAdmission {
   const item = readCodexNotificationThreadItem(event.params, readCodexThreadItem)
-  const announcement = item && readCodexSubagentAnnouncement(item)
-  if (announcement && announcement.agentThreadId !== input.primaryThreadId) {
+  const announcements = item ? readCodexSubagentAnnouncements(item, input.primaryThreadId) : []
+  for (const announcement of announcements) {
     input.executions.register(announcement.agentThreadId, announcement.label, undefined)
   }
   const compaction = input.compactions.handle(event)
