@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { CatalogModel } from '../../../../shared/agent-session-option-catalog'
 import type { NativeChatSessionOptionDispatchCommand } from './native-chat-session-option-command-dispatch'
 import { clearNativeChatModelEnrichmentForTests } from './native-chat-session-option-enrichment'
+import { nativeChatModelPillLabel } from './native-chat-session-option-labels'
 
 const discoverModels = vi.fn<() => Promise<readonly CatalogModel[] | null>>()
 
@@ -230,6 +231,7 @@ describe('useNativeChatSessionOptions model reporting', () => {
       value: 'GPT-6-Sol',
       label: 'GPT-6-Sol'
     })
+    expect(nativeChatModelPillLabel(result.current.snapshot[0]!)).toBe('GPT-6-Sol')
   })
 
   it('re-resolves the reported model against models discovered after the read', async () => {
