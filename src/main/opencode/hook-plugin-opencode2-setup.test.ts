@@ -281,6 +281,8 @@ describe.each(['opencode', 'opencode2'] as const)('%s plugin on OpenCode 2', (ag
             data: { sessionID: 'ses_root', assistantMessageID: 'msg-1', text: 'hello' }
           }
           yield { type: 'form.cancelled', data: { id: 'form-1', sessionID: 'ses_root' } }
+          // A tool-raised form proves a running turn, so only the turn's end settles Idle.
+          yield { type: 'session.execution.interrupted', data: { sessionID: 'ses_root' } }
         }
       }
     })
@@ -316,7 +318,7 @@ describe.each(['opencode', 'opencode2'] as const)('%s plugin on OpenCode 2', (ag
   // (v2.0.12 capture in docs/bug-reproductions/opencode2-form-created-kinds).
   async function runSetupBridge(
     events: { type: string; data: Record<string, unknown> }[]
-  ): Promise<{ names: string[]; cleanup?: () => Promise<void> }> {
+  ): Promise<{ names: string[]; cleanup?: () => Promise<void>; drained: Promise<void> }> {
     process.env.ORCA_PANE_KEY = 'tab-1:leaf-1'
     const names: string[] = []
     globalThis.fetch = vi.fn(async (_input, init) => {
@@ -328,6 +330,12 @@ describe.each(['opencode', 'opencode2'] as const)('%s plugin on OpenCode 2', (ag
         ? _internals.getOpenCode2PluginSource()
         : _internals.getOpenCodePluginSource()
     )
+    // Why: the bridge awaits each event's handling before pulling the next, so the
+    // generator finishing means every lifecycle post the events cause has been made.
+    let markDrained = (): void => {}
+    const drained = new Promise<void>((resolve) => {
+      markDrained = resolve
+    })
     const cleanup = await module.default?.setup?.({
       session: {
         get: async ({ sessionID }: { sessionID: string }) => ({ data: { id: sessionID } }),
@@ -338,10 +346,11 @@ describe.each(['opencode', 'opencode2'] as const)('%s plugin on OpenCode 2', (ag
           for (const event of events) {
             yield event
           }
+          markDrained()
         }
       }
     })
-    return { names, cleanup }
+    return { names, cleanup, drained }
   }
 
   function questionForm(id: string): Record<string, unknown> {
@@ -504,6 +513,116 @@ describe.each(['opencode', 'opencode2'] as const)('%s plugin on OpenCode 2', (ag
       expect(names).toContain('AskUserQuestion')
     })
     expect(names.at(-1)).toBe('AskUserQuestion')
+    await cleanup?.()
+  })
+
+  const toolSource = { type: 'tool', messageID: 'msg-0', id: 'tool-0' }
+  const blockers = {
+    question: {
+      name: 'AskUserQuestion',
+      asked: { type: 'form.created', data: { form: questionForm('form-q') } },
+      replied: {
+        type: 'form.replied',
+        data: { id: 'form-q', sessionID: 'ses_root', answer: { q0: 'Yes' } }
+      }
+    },
+    permission: {
+      name: 'PermissionRequest',
+      asked: {
+        type: 'permission.asked',
+        data: {
+          id: 'per-1',
+          sessionID: 'ses_root',
+          action: 'shell',
+          resources: ['rm -rf build'],
+          source: toolSource
+        }
+      },
+      replied: {
+        type: 'permission.replied',
+        data: { sessionID: 'ses_root', requestID: 'per-1', reply: 'once' }
+      }
+    }
+  }
+
+  // The reload lands after this step's step.started, so no later step start precedes the reply.
+  it.each(['question', 'permission'] as const)(
+    'keeps Working after answering a %s raised in the step a mid-turn reload joined',
+    async (kind) => {
+      const blocker = blockers[kind]
+      const stepAfterReload = [
+        { type: 'session.tool.called', data: { sessionID: 'ses_root', id: 'tool-shell' } },
+        { type: 'session.tool.called', data: { sessionID: 'ses_root', id: 'tool-0' } },
+        blocker.asked,
+        blocker.replied,
+        { type: 'session.tool.success', data: { sessionID: 'ses_root', id: 'tool-0' } },
+        // A long sibling tool keeps the step open after the reply.
+        { type: 'session.tool.progress', data: { sessionID: 'ses_root', id: 'tool-shell' } },
+        { type: 'session.tool.success', data: { sessionID: 'ses_root', id: 'tool-shell' } },
+        { type: 'session.step.ended', data: { sessionID: 'ses_root', finish: 'tool-calls' } }
+      ]
+      const midTurn = await runSetupBridge(stepAfterReload)
+      await midTurn.drained
+      expect(midTurn.names).toEqual([blocker.name, 'SessionBusy'])
+      await midTurn.cleanup?.()
+
+      const wholeTurn = await runSetupBridge([
+        ...stepAfterReload,
+        { type: 'session.step.started', data: { sessionID: 'ses_root' } },
+        { type: 'session.step.ended', data: { sessionID: 'ses_root', finish: 'stop' } },
+        { type: 'session.execution.succeeded', data: { sessionID: 'ses_root' } }
+      ])
+      await wholeTurn.drained
+      expect(wholeTurn.names).toEqual([blocker.name, 'SessionBusy', 'SessionIdle'])
+      await wholeTurn.cleanup?.()
+    }
+  )
+
+  it('settles on Done when a question raised after a mid-turn reload is cancelled by an interrupt', async () => {
+    const { names, cleanup, drained } = await runSetupBridge([
+      { type: 'session.tool.called', data: { sessionID: 'ses_root', id: 'tool-0' } },
+      { type: 'form.created', data: { form: questionForm('form-q') } },
+      { type: 'form.cancelled', data: { id: 'form-q', sessionID: 'ses_root' } },
+      { type: 'session.tool.failed', data: { sessionID: 'ses_root', id: 'tool-0' } },
+      { type: 'session.execution.interrupted', data: { sessionID: 'ses_root' } }
+    ])
+    await drained
+    expect(names).toEqual(['AskUserQuestion', 'SessionBusy', 'SessionIdle'])
+    await cleanup?.()
+  })
+
+  // Why: OpenCode's HTTP API can park a form on an idle session; its reply starts no work.
+  it('returns to Done after answering a form no tool raised', async () => {
+    const { names, cleanup, drained } = await runSetupBridge([
+      {
+        type: 'form.created',
+        data: {
+          form: {
+            id: 'form-api',
+            sessionID: 'ses_root',
+            title: 'Confirm',
+            fields: [{ key: 'q0', title: 'Proceed?', type: 'string', options: [] }]
+          }
+        }
+      },
+      {
+        type: 'form.replied',
+        data: { id: 'form-api', sessionID: 'ses_root', answer: { q0: 'Yes' } }
+      }
+    ])
+    await drained
+    expect(names).toEqual(['AskUserQuestion', 'SessionIdle'])
+    await cleanup?.()
+  })
+
+  // The reload lands while a question is pending, so this instance never saw its form.
+  it('posts nothing while a sibling tool finishes under a question pending since before a reload', async () => {
+    const { names, cleanup, drained } = await runSetupBridge([
+      { type: 'session.tool.progress', data: { sessionID: 'ses_root', id: 'tool-shell' } },
+      { type: 'session.tool.success', data: { sessionID: 'ses_root', id: 'tool-shell' } }
+    ])
+    await drained
+    expect(names).toEqual([])
     await cleanup?.()
   })
 
